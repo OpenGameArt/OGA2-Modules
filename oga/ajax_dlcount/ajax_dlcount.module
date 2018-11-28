@@ -1,0 +1,124 @@
+<?php
+
+function ajax_dlcount_menu() {
+  $items = array();
+  $items['admin/config/content/ajax_dlcount'] = array(
+    'title' => 'AJAX Download Count',
+    'description' => 'Configure the AJAX Download Count module',
+    'page callback' => 'drupal_get_form',
+    'page arguments' => array('ajax_dlcount_form'),
+    'access arguments' => array('access administration pages'),
+    'type' => MENU_NORMAL_ITEM,
+  );
+  
+  $items['file/%/dlcounter'] = array(
+    'page callback' => 'ajax_dlcount_count',
+    'delivery callback' => 'ajax_deliver',
+    'page arguments' => array(1),
+    'access arguments' => array('access content'),
+    'access callback' => TRUE,
+    'type' => MENU_CALLBACK,
+  );
+  return $items;
+}
+
+function ajax_dlcount_form($form, &$form_state) {
+  $form['ajax_dlcount_keep_history'] = array(
+    '#type' => 'integer',
+    '#title' => t('Hours to Keep History'),
+    '#default_value' => variable_get('ajax_dlcount_keep_history', 24),
+    '#description' => "The number of hours to keep a history of what IP downloaded each file, to prevent counting two downloads from the same IP address.  Leave blank for forever (not recommended for large sites).",
+    '#required' => FALSE,
+  );
+  
+  return system_settings_form($form);
+}
+
+function ajax_dlcount_count($fid) {
+  // Check if the remote IP is already in the history for this file
+  global $user;
+  //error_log("ajax_dlcount_count: $fid (" . $user->name . ")");
+  
+  $history = db_query('SELECT COUNT(*) FROM file_dlcount_history WHERE ip = :ip AND fid = :fid', array(':ip' => ip_address(), ':fid' => $fid))->fetchField();
+  
+  $count = db_query('SELECT count FROM file_dlcount WHERE fid = :fid', array(':fid' => $fid))->fetchField(); 
+  
+  if(!$history) {
+    module_invoke_all('ajax_dlcount_pre_increment', $fid, $count);
+    if($count != '') {
+      $count++;
+      db_query('UPDATE file_dlcount SET count = :count WHERE fid = :fid', array(':fid' => $fid, ':count' => $count));
+    } else {
+      $count = 1;
+      db_query('INSERT INTO file_dlcount (fid, count) values (:fid, 1)', array(':fid' => $fid));
+    }
+  
+    db_query('INSERT INTO file_dlcount_history (fid, ip, timestamp) values (:fid, :ip, :timestamp)', array(':ip' => ip_address(), ':fid' => $fid, ':timestamp' => time()));
+    
+    module_invoke_all('ajax_dlcount_post_increment', $fid, $count);
+  }
+  
+  module_invoke_all('ajax_dlcount', $fid, $count);
+  
+  drupal_json_output(array('dlcount' => $count));
+  exit(0);
+}
+
+function ajax_dlcount_cron() {
+  $keep = variable_get('ajax_dlcount_keep_history', 24);
+  if($keep) {
+    $time = time();
+    $expire = $time - $keep * 3600;
+    db_query('DELETE FROM {file_dlcount_history} WHERE timestamp < :expire', array(':expire' => $expire));
+  }
+}
+
+function ajax_dlcount_file_link($variables) {
+  drupal_add_js(drupal_get_path('module', 'ajax_dlcount') .'/ajax_dlcount.js');
+  $file = $variables['file'];
+  $icon_directory = $variables['icon_directory'];
+
+  $url = file_create_url($file->uri);
+  $icon = theme('file_icon', array('file' => $file, 'icon_directory' => $icon_directory, 'alt' => check_plain($file->filename)));
+
+  // Set options as per anchor format described at
+  // http://microformats.org/wiki/file-format-examples
+  $options = array(
+    'attributes' => array(
+      'type' => $file->filemime . '; length=' . $file->filesize,
+      'data-fid' => $file->fid,
+      'target' => '_blank',
+      'download' => check_plain($file->filename),
+    ),
+  );
+
+  // Use the description as the link text if available.
+  if (empty($file->description)) {
+    $link_text = $file->filename;
+  }
+  else {
+    $link_text = $file->description;
+    $options['attributes']['title'] = check_plain($file->filename);
+  }
+  
+  $size_units = array('b', 'Kb', 'Mb', 'Gb');
+  $size = $file->filesize;
+  $unit = 0;
+  while($size >= 1000 && $unit < count($size_units)) {
+    $size = round($size / 1000, 1);
+    $unit++;
+  }
+  
+  $dlcount = ajax_dlcount_get_count($file->fid);
+  if(!$dlcount) $dlcount = 0;
+
+  return '<span class="file">' . $icon . ' ' . l($link_text, $url, $options) . " {$size} {$size_units[$unit]}" . ' <span class="dlcount">[<span class="dlcount-number" id="dlcount-' . $file->fid . '">' . $dlcount . '</span> download(s)]</span></span>';
+}
+
+function ajax_dlcount_theme_registry_alter(&$theme_registry) {
+  $theme_registry['file_link']['function'] = 'ajax_dlcount_file_link';
+}
+
+function ajax_dlcount_get_count($fid) {
+  return db_query('SELECT count FROM file_dlcount WHERE fid = :fid', array(':fid' => $fid))->fetchField();
+}

@@ -1,0 +1,1532 @@
+<?php
+
+/*
+ * Migration steps:
+ *
+ * 1. Set up new Drupal instance with clear database
+ * 2. Clear sites/default/files
+ * 3. Enable OGA2 feature
+ * 4. Enable ogamigrate module
+ * 5. Copy the OGA2 theme
+ * 6. Run migrate batch
+ * 7. Enable themekey settings
+ */
+
+function ogamigrate_permission() {
+  return array(
+    'migrate to oga2' => array(
+      'title' => t('OGA 1.x -> OGA 2.0 Data Migration'), 
+      'description' => t('Migrate data from the old site.'),
+    ),
+  );
+}
+
+function ogamigrate_menu() {
+  $items['admin/ogamigrate'] = array(
+    'page callback' => '_ogamigrate_batch',
+    'access arguments' => array('migrate to oga2'),
+  );
+  
+  $items['admin/ogamigrate/finished'] = array(
+    'page callback' => '_ogamigrate_complete',
+    'access arguments' => array('migrate to oga2'),
+  );
+  return $items;
+}
+
+function _ogamigrate_go() {
+  ini_set('display_errors', 1);
+  #set_error_handler('_ogamigrate_backtrace');
+  #variable_set('oga_skip_generate_preview', TRUE);
+  #_ogamigrate_static_vocabs();
+  _ogamigrate_delete_forum('General discussion');
+  _ogamigrate_setup_tags();
+  _ogamigrate_roles();
+  _ogamigrate_medals();
+  _ogamigrate_users();
+  _ogamigrate_flags('friends', 3);
+  _ogamigrate_forum_tags();
+  _ogamigrate_forum_parents();
+  _ogamigrate_tags();
+  _ogamigrate_nodes();
+  #_ogamigrate_flags('favorites', 2);
+  _ogamigrate_clean_tags();
+  _ogamigrate_activate_view_modes();
+  _ogamigrate_setup_blocks();
+
+  _ogamigrate_delete_forum("Contest Judges' Forum");
+  _ogamigrate_delete_forum("Private Forums");
+  _ogamigrate_delete_forum("Site Editors' Forum");
+  _ogamigrate_delete_forum("Site Editors");
+  #variable_set('oga_skip_generate_preview', FALSE);
+  variable_set('node_admin_theme', 0);
+  variable_set('user_register', 1);
+}
+
+function _ogamigrate_setup_tags() {
+  $vocabs = taxonomy_vocabulary_get_names();
+  /*
+  
+  if(!$vocabs['art_tags']) {
+    $tags = new stdClass;
+    $tags->machine_name = 'art_tags';
+    $tags->name = 'Art Tags';
+    taxonomy_vocabulary_save($tags);
+  }
+  */
+
+  $art_types = array('2D Art', '3D Art', 'Document', 'Music', 'Sound Effect', 'Texture');
+  foreach($art_types as $t) {
+    $term = new stdClass;
+    $term->name = $t;
+    $term->vid = $vocabs['art_types']->vid;
+    print("Adding art type $t\n");
+    taxonomy_term_save($term);
+  }
+
+  $art_ratings = array('Abandoned', 'WIP', 'Complete', 'Refined');
+  foreach($art_ratings as $t) {
+    $term = new stdClass;
+    $term->name = $t;
+    $term->vid = $vocabs['art_rating']->vid;
+    print("Adding art rating $t\n");
+    taxonomy_term_save($term);
+  }
+
+  $terms = array();
+
+  $terms[] = array(
+    'name' => 'Commment',
+    'image' => 'oga-icon-comment.png',
+  );
+  
+  $terms[] = array(
+    'name' => 'Critique',
+    'image' => 'oga-icon-critique.png',
+  );
+  
+  $terms[] = array(
+    'name' => 'Remix',
+    'image' => 'oga-icon-remix.png',
+  );
+  
+  $terms[] = array(
+    'name' => 'Update',
+    'image' => 'oga-icon-update.png',
+  );
+  $fids = array();
+  $destination = file_default_scheme() . '://comment_type_images';
+  file_prepare_directory($destination, FILE_CREATE_DIRECTORY);
+
+  foreach($terms as $t) {
+    $term = new stdClass;
+    $term->name = $t['name'];
+    #$term->vocabulary_machine_name = 'licenses';
+    $term->vid = $vocabs['art_comment_type']->vid;
+    $term->field_license_deed['und'][0]['value'] = $t['deed'];
+
+    if(!array_key_exists($t['image'], $fids)) {
+      $path = drupal_get_path('module', 'ogamigrate') . '/images/' . $t['image'];
+      $newfile = file_unmanaged_copy($path, $destination);
+      $newuri = $destination . "/" . basename($newfile);
+      $file = new stdClass;
+      $file->fid = NULL;
+      $file->uri = $newuri;
+      $file->filename = basename($newfile);
+      $file->filemime = file_get_mimetype($file->uri);
+      $file->uid      = 1;
+      $file->status   = FILE_STATUS_PERMANENT;
+      $image = file_save($file);
+      $fids[$t['image']] = $image->fid;
+    }
+    $term->field_comment_type_icon['und'][0]['fid'] = $fids[$t['image']];
+
+    //print_r($term);
+    print("Saving comment image {$term->name}\n");
+    taxonomy_term_save($term);
+  }
+}
+
+function _ogamigrate_static_vocabs() {
+  # TODO: hard code static vocabularies
+  foreach(unserialize(_ogamigrate_get_license_list()) as $l) {
+    print_r($l);
+    taxonomy_term_save($l);
+  }
+  $context['finished'] = 1;
+}
+
+function _ogamigrate_tags() {
+  $context = array();
+  if (empty($context['sandbox'])) {
+    db_set_active('default');
+    $vocabs = taxonomy_vocabulary_get_names();
+    #error_log(print_r($vocabs, true));
+    $context['sandbox']['vid'] = $vocabs['art_tags']->vid;
+    $context['sandbox']['progress'] = 0;
+    $context['sandbox']['current_tid'] = 0;
+    db_set_active('old');
+    $context['sandbox']['max'] = db_query('select max(tid) from {term_data} where vid in (3, 4, 6, 7, 10);')->fetchField();
+  }
+    
+  
+  #error_log("migrating tid {$context['sandbox']['current_tid']} ({$context['finished']}");
+  #error_log("vid: " . $context['sandbox']['tags_vid']);
+  
+  $limit = 5;
+
+  while($context['sandbox']['current_tid'] < $context['sandbox']['max']) {
+    //print("{$context['sandbox']['current_tid']} / {$context['sandbox']['max']}\n");
+    db_set_active('old');
+
+    $result = db_select('term_data')
+    ->fields('term_data', array('tid', 'name', 'description'))
+    ->condition('tid', $context['sandbox']['current_tid'], '>')
+    ->condition('vid', array(3, 4, 6, 7, 10), 'in')
+    ->orderBy('tid')
+    ->range(0, $limit)
+    ->execute();
+
+    db_set_active('default');
+
+    foreach ($result as $row) {
+      #error_log("Processing tid {$row->tid} / {$context['sandbox']['max']} ({$row->name}) vid: {$context['sandbox']['vid']}");
+      $context['results'][] = $row->tid . ' : ' . $row->name;
+      $context['sandbox']['current_tid'] = $row->tid;
+      print("Processing tag {$row->tid} / {$context['sandbox']['max']} ({$row->name})\n");
+
+      # Check and see if a term by this name already exists in the art_tags vocabulary.
+      # If not, go ahead and create it.
+
+      $exists = false;
+    $terms = taxonomy_get_term_by_name($row->name);
+      foreach($terms as $t) {
+        if($t->vocabulary_machine_name == 'art_tags')
+          $exists = true;
+      }
+
+      if(!$exists) {
+        $term = new stdClass;
+        $term->vid = $context['sandbox']['vid'];
+        $term->name = $row->name;
+        $term->description = $row->description;
+        taxonomy_term_save($term);
+      }
+    }
+
+  }
+}
+
+function _ogamigrate_forum_tags() {
+  $context = array();
+  error_log("Migrating forums");
+  if (empty($context['sandbox'])) {
+    db_set_active('default');
+    $vocabs = taxonomy_vocabulary_get_names();
+    #error_log(print_r($vocabs, true));
+    $context['sandbox']['vid'] = $vocabs['forums']->vid;
+    $context['sandbox']['progress'] = 0;
+    $context['sandbox']['current_tid'] = 0;
+    db_set_active('old');
+    $context['sandbox']['max'] = db_query('select max(tid) from {term_data} where vid = 2')->fetchField();
+
+    
+  }
+
+
+  while($context['sandbox']['current_tid'] < $context['sandbox']['max']) {
+    db_set_active('old');
+
+    #error_log("migrating tid {$context['sandbox']['current_tid']} ({$context['finished']}");
+    #error_log("vid: " . $context['sandbox']['tags_vid']);
+
+    $limit = 5;
+
+    $result = db_select('term_data')
+    ->fields('term_data', array('tid', 'name', 'description'))
+    ->condition('tid', $context['sandbox']['current_tid'], '>')
+    ->condition('vid', 2, '=')
+    ->orderBy('tid')
+    ->range(0, $limit)
+    ->execute();
+
+    db_set_active('default');
+
+    foreach ($result as $row) {
+      print("Processing tid {$row->tid} / {$context['sandbox']['max']} ({$row->name}) vid: {$context['sandbox']['vid']}\n");
+      $context['results'][] = $row->tid . ' : ' . $row->name;
+      $context['sandbox']['current_tid'] = $row->tid;
+      $context['message'] = "Processing tid {$row->tid} / {$context['sandbox']['max']} ({$row->name})";
+
+      # Check and see if a term by this name already exists in the art_tags vocabulary.
+      # If not, go ahead and create it.
+
+      $exists = false;
+      $terms = taxonomy_get_term_by_name($row->name);
+      foreach($terms as $t) {
+        if($t->vocabulary_machine_name == 'forums')
+          $exists = true;
+      }
+      if(!$exists) {
+        #db_set_active('old');
+        #$parent = db_query('select parent from {term_hierarchy} where tid = :tid', array(':tid' => $row->tid))->fetchField();
+
+        db_set_active('default');
+        $term = new stdClass;
+        $term->vid = $context['sandbox']['vid'];
+        $term->name = $row->name;
+        $term->description = $row->description;
+        #error_log("parent: $parent");
+        #if($parent)
+          #$term->parent = $parent;
+        taxonomy_term_save($term);
+      }
+    }
+  }
+}    
+
+function _ogamigrate_forum_parents() {
+  db_set_active('default');
+  $vocabs = taxonomy_vocabulary_get_names();
+  $vocabs['forums']->vid;
+  $forums = _ogamigrate_load_vocabulary($vocabs['forums']->vid);
+    
+  db_set_active('old');
+  $old = _ogamigrate_load_old_vocabulary(2);
+  $oldforums = array();
+  foreach($old as $tid => $name) {
+    $oldforums[$name] = $tid;
+    #error_log("Old forum $name -> $tid");
+  }
+  
+  $containers = db_query("select value from {variable} where name = 'forum_containers'")->fetchField();
+  error_log("CONTAINERS: $containers" . print_r(unserialize($containers), true));
+  
+  $containers = unserialize($containers);
+  
+  foreach($forums as $name => $tid) {
+    db_set_active('old');
+    $parent = db_query("select parent from {term_hierarchy} where tid = :tid", array(":tid" => $oldforums[$name]))->fetchField();
+    $p = $old[$parent];
+    $newparent = $forums[$p];
+    db_set_active('default');
+    $term = taxonomy_term_load($tid);
+    $term->parent = $newparent;
+    
+    print("Parent for {$term->name}: $parent -> $p -> $newparent\n");
+    taxonomy_term_save($term);
+  }
+  
+  $newcontainers = array();
+  
+  foreach($containers as $c) {
+    $p = $old[$c];
+    $newparent = $forums[$p];
+    error_log("Container: $c -> $p -> $newparent");
+    array_push($newcontainers, $newparent);
+  }
+  
+  variable_set('forum_containers', $newcontainers);
+  variable_set('advanced_forum_style', 'naked');
+  /*
+  $menu = array(
+    'tid' => 0,
+    'vid' => $vocabs['forums']->vid,
+    'menu_name' => 'main-menu'
+  );
+  _taxonomy_menu_save($menu);
+  _taxonomy_menu_rebuild($vocabs['forums']->vid);
+  */
+}
+
+function _ogamigrate_users() {
+  variable_set('disable_medals_presave', TRUE);
+  global $medals;
+  print_r($medals);
+  
+  $context = array();
+  $roles = array();
+  $vocabs = taxonomy_vocabulary_get_names();
+  $rolemap = array(
+    3 => 'administrator',
+    4 => 'editor',
+    26 => 'skip moderation',
+    28 => 'skip moderation'
+  );
+
+  $newroles = array();
+  db_set_active('default');
+  $r = db_select('role')
+  ->fields('role', array('rid', 'name'))
+  ->execute();
+  foreach($r as $row) {
+    $newroles[$row->name] = $row->rid;
+  }
+  if (empty($context['sandbox'])) {
+    error_log("SANDBOX EMPTY");
+    db_set_active('default');
+    $context['sandbox']['progress'] = 0;
+    $context['sandbox']['current_uid'] = 1;
+    db_set_active('old');
+    $context['sandbox']['max'] = db_query('select max(uid) from {users};')->fetchField();
+
+
+    $r = db_select('role')
+    ->fields('role', array('rid', 'name'))
+    ->execute();
+
+    foreach($r as $row) {
+      $roles[$row->rid] = $row->name;
+    }
+  }
+  $medal_voc = $vocabs['medals']->vid;
+  print_r($roles);
+
+/*
+  db_set_active('default');
+  foreach($roles as $rid => $rname) {
+    db_set_active('default');
+    $term = new stdClass;
+    $term->vid = $medal_voc;
+    $term->name = $rname;
+    #error_log("parent: $parent");
+    #if($parent)
+      #$term->parent = $parent;
+    $term->field_medal_image = array();
+    $term->field_points_type = array();
+    $term->field_points_required = array();
+    $term->field_role_required = array();
+    print_r($term);
+    taxonomy_term_save($term);
+  }
+  $medals = _ogamigrate_load_vocabulary($medal_voc);
+  */
+  #error_log("migrating uid {$context['sandbox']['current_uid']} ({$context['finished']}");
+  #error_log("vid: " . $context['sandbox']['tags_vid']);
+  while($context['finished'] = $context['sandbox']['current_uid'] < $context['sandbox']['max']) {
+    $limit = 5;
+
+    db_set_active('old');
+
+    $result = db_select('users')
+    ->fields('users', array('uid', 'name', 'pass', 'mail', 'created', 'access', 'login', 'status', 'timezone', 'timezone_name'))
+    ->condition('uid', $context['sandbox']['current_uid'], '>')
+    ->orderBy('uid')
+    ->range(0, $limit)
+    ->execute();
+
+    db_set_active('default');
+
+    foreach ($result as $row) {
+      #error_log("Processing tid {$row->tid} / {$context['sandbox']['max']} ({$row->name}) vid: {$context['sandbox']['vid']}");
+      $context['results'][] = $row->uid . ' : ' . $row->name;
+      $context['sandbox']['current_uid'] = $row->uid;
+      print("Processing uid {$row->uid} / {$context['sandbox']['max']} ({$row->name})\n");
+      #error_log($context['message']);
+
+      # Check and see if a term by this name already exists in the art_tags vocabulary.
+      # If not, go ahead and create it.
+
+      $exists = false;
+      if(!user_load_by_name($row->name)) {
+        $edit = array(
+          'name' => $row->name,
+          'pass' => $row->pass,
+          'mail' => $row->mail,
+          'status' => $row->status,
+          'timezone' => $row->timezone_name,
+          'created' => $row->created,
+          'access' => $row->access,
+          'login' => $row->login,
+          'uid' => $row->uid,
+          'is_new' => true,
+          'field_medals' => array(),
+          'field_oga1_uid' => array('und' => array(array('value' => $row->uid))),
+        );
+        //error_log("old id: " . print_r($edit['field_oga1_uid'], true));
+
+        db_set_active('old');
+        $user_roles = db_select('users_roles')
+          ->fields('users_roles', array('rid'))
+          ->condition('uid', $edit['uid'], '=')
+          ->execute();
+          
+        db_set_active('default');
+
+        $edit['roles'] = array();
+        foreach($user_roles as $role) {
+          if($role->rid == 3) {
+            $edit['roles'][2] = 'administrator';
+          } elseif($role->rid == 4) {
+            $edit['roles'][3] = 'editor';
+          } elseif($role->rid == 26 || $role->rid == 28) {
+            $edit['roles'][4] = 'skip moderation';
+          }
+        }
+
+        db_set_active('old');
+        $user_medals = db_select('user_badges_user')
+          ->fields('user_badges_user', array('uid', 'bid'))
+          ->condition('uid', $edit['uid'], '=')
+          ->execute();
+
+        db_set_active('default');
+        foreach($user_medals as $m) {
+          print("User {$edit['name']}: {$edit['uid']} -> medal {$m->bid}\n");
+          $edit['field_medals']['und'][] = array('tid' => $medals[$m->bid]->tid);
+        }
+
+        #print_r($edit);
+        $account = user_save(NULL, $edit);
+        #user_save($account, array('field_oga1_uid' => array('und' => array($row->uid))));
+
+        $new_hash = user_hash_password($row->pass);
+        #error_log("New password hash: $new_hash");
+        if ($new_hash) {
+          $new_hash  = 'U' . $new_hash;
+          db_update('users')
+          ->fields(array('pass' => $new_hash))
+          ->condition('uid', $account->uid)
+          ->execute();
+        }
+        
+      }
+    }
+  }
+  #if ($context['sandbox']['progress'] != $context['sandbox']['max']) {
+  variable_set('disable_medals_presave', FALSE);
+}
+
+
+function _ogamigrate_medals() {
+  db_set_active('default');
+  $vocabs = taxonomy_vocabulary_get_names();
+  $medal_voc = $vocabs['medals']->vid;
+  
+  db_set_active('old');
+  $result = db_select('user_badges_badges')
+  ->fields('user_badges_badges', array('bid', 'name', 'image', 'weight', 'href'))
+  ->orderBy('weight')
+  ->execute();
+
+  global $medals;
+  $medals = array();
+  $medalnames = array();
+  
+  foreach($result as $row) {
+    $medals[$row->bid] = $row;
+    $medalnames[$row->name] = $row;
+  }
+  
+  db_set_active('default');
+  $destination = file_default_scheme() . '://medal_images';
+  file_prepare_directory($destination, FILE_CREATE_DIRECTORY);
+  
+  foreach($medals as $bid => $medal) {
+    db_set_active('default');
+    $term = new stdClass;
+    $term->vid = $medal_voc;
+    $term->name = $medal->name;
+    #error_log("parent: $parent");
+    #if($parent)
+      #$term->parent = $parent;
+    $term->field_points_type = array();
+    $term->field_points_required = array();
+    $term->field_role_required = array();
+    print_r($term);
+    
+    $path = "/var/www/sites/opengameart/" . $medal->image;
+    $newfile = file_unmanaged_copy($path, $destination);
+    $newuri = $destination . "/" . basename($newfile);
+    $file = new stdClass;
+    $file->fid = NULL;
+    $file->uri = $newuri;
+    $file->filename = basename($newfile);
+    $file->filemime = file_get_mimetype($file->uri);
+    $file->uid      = 1;
+    $file->status   = FILE_STATUS_PERMANENT;
+    $image = file_save($file);
+
+    $term->field_medal_image['und'][0]['fid'] = $image->fid;
+
+    //print_r($term);
+    print("Saving medal {$term->name}\n");
+ 
+    taxonomy_term_save($term);
+    $medals[$bid]->tid = $term->tid;
+    print("Medal: {$term->name}\n");
+    #print_r($term);
+  }
+}
+
+function _ogamigrate_flags($name, $oldfid, $start = 0, $end = 0) {
+  db_set_active('old');
+
+  if($end == 0) {
+    $result = db_select('flag_content')
+    ->fields('flag_content', array('content_id', 'uid', 'timestamp'))
+    ->condition('fid', $oldfid, '=')
+    ->execute();
+  } else {
+    $result = db_select('flag_content')
+    ->fields('flag_content', array('content_id', 'uid', 'timestamp'))
+    ->condition('fid', $oldfid, '=')
+    ->condition('content_id', $start, '>=')
+    ->condition('content_id', $end, '<=')
+    ->execute();
+  }
+
+  db_set_active('default');
+  foreach($result as $row) {
+    print("$name: {$row->uid} -> {$row->content_id}\n");
+    $f = flag_get_flag($name);
+    #print_r($f);
+    $account = user_load($row->uid);
+    $result = $f->flag('flag', $row->content_id, $account, TRUE);
+    if(!$result) print("failed\n");
+  }
+}
+
+function _ogamigrate_additional_previews($start, $end) {
+  db_set_active('old');
+
+  variable_set('oga_disable_events', TRUE);
+  $oldpath = "/var/www/sites/opengameart.old";
+  
+  
+  $result = db_select('node')
+  ->fields('node', array('nid'))
+  ->condition('type', array('2d_graphic', '3d_art', 'audio'), 'in')
+  ->condition('nid', $start, '>=')
+  ->condition('nid', $end, '<')
+  ->orderBy('nid')
+  ->execute();
+
+
+  foreach ($result as $row) {
+    //global $user;
+    //$uid = $user->uid;
+
+    
+    $nid = $row->nid;
+    db_set_active('old');
+
+    $nodeinfoquery = db_select('node')
+      ->fields('node', array('nid', 'type', 'title', 'uid', 'status', 'created', 'changed'))
+      ->condition('nid', $nid, '=')
+      ->condition('status', 1, '=')
+      ->execute();
+
+    foreach($nodeinfoquery as $nodeinfo) {
+      _ogamigrate_load_node_revision($nodeinfo);
+      print("Node {$nodeinfo->nid} / {$nodeinfo->vid}:\n");
+      db_set_active('old');
+      _ogamigrate_load_file_field($nodeinfo, 'additional_previews');
+      
+      db_set_active('default');
+      $node = node_load($nid);
+      $copied = false;
+      foreach($nodeinfo->additional_previews as $row) {
+        #print_r($row);
+        print("File: {$row->filepath}\n");
+        $f = _ogamigrate_file_copy("$oldpath/" . $row->filepath, NULL, FILE_EXISTS_REPLACE, $uid);
+        if($f->fid)
+          array_push($node->field_art_preview['und'], _ogamigrate_file_array($f));
+        $copied = true;
+      }
+
+      #print_r($node);
+      db_set_active('default');
+      if($copied) node_save($node);
+    }
+  }
+
+  db_set_active('default');
+  variable_set('oga_disable_events', TRUE);
+}
+
+function _ogamigrate_authors() {
+  db_set_active('old');
+
+  variable_set('oga_disable_events', TRUE);
+  $oldpath = "/var/www/sites/opengameart.old";
+
+  /*
+  $result = db_select('node')
+  ->fields('node', array('nid'))
+  ->condition('type', array('2d_graphic', '3d_art', 'audio'), 'in')
+  ->condition('nid', $start, '>=')
+  ->condition('nid', $end, '<')
+  ->orderBy('nid')
+  ->execute();
+  */
+
+  $result = db_query("select nid from node where type in ('2d_graphic', '3d_art', 'audio') and (nid in (select nid from content_field_author) or nid in (select nid from content_field_author_email) or nid in (select nid from content_field_author_homepage))");
+
+  foreach ($result as $row) {
+    //global $user;
+    //$uid = $user->uid;
+
+
+    $nid = $row->nid;
+    db_set_active('old');
+
+    $nodeinfoquery = db_select('node')
+      ->fields('node', array('nid', 'type', 'title', 'uid', 'status', 'created', 'changed'))
+      ->condition('nid', $nid, '=')
+      ->condition('status', 1, '=')
+      ->execute();
+
+    foreach($nodeinfoquery as $nodeinfo) {
+      _ogamigrate_load_node_revision($nodeinfo);
+      print("Node {$nodeinfo->nid} / {$nodeinfo->vid}:\n");
+      db_set_active('old');
+
+      $author = db_query("select field_author_value from content_field_author where vid = :vid", array(":vid" => $nodeinfo->vid))->fetchField();
+      $mail = db_query("select field_author_email_email from content_field_author_email where vid = :vid", array(":vid" => $nodeinfo->vid))->fetchField();
+      $homepage = db_query("select field_author_homepage_url from content_field_author_homepage where vid = :vid", array(":vid" => $nodeinfo->vid))->fetchField();
+     
+      if($author || $email || $homepage) {
+        db_set_active('default');
+        $node = node_load($nid);
+
+        if($author) {
+          $node->field_art_author = array();
+          $node->field_art_author['und'][0]['value'] = $author;
+          print("Author: $author\n");
+        }
+
+        if($mail) {
+          $node->field_art_author_email = array();
+          $node->field_art_author_email['und'][0]['value'] = $mail;
+          print("Mail: $mail\n");
+        }
+
+        if($homepage) {
+          $node->field_art_author_homepage = array();
+          $node->field_art_author_homepage['und'][0]['value'] = $homepage;
+          print("Homepage: $homepage\n");
+        }
+
+        #print_r($node);
+        db_set_active('default');
+        node_save($node);
+      }
+    }
+  }
+
+  #db_set_active('default');
+  variable_set('oga_disable_events', TRUE);
+}
+
+function _ogamigrate_nodes() {
+  ini_set('display_errors', 1);
+  $context = array();
+  variable_set('comment_maintain_node_statistics', TRUE);
+  variable_set('oga_disable_events', TRUE);
+  #variable_set('oga_skip_generate_preview', TRUE);
+
+  $oldpath = "/var/www/sites/opengameart";
+  if (empty($context['sandbox'])) {
+    error_log("ogamigrate_nodes");
+    db_set_active('default');
+    $vocabs = taxonomy_vocabulary_get_names();
+    #error_log(print_r($vocabs, true));
+    $context['sandbox']['vid'] = $vocabs['art_tags']->vid;
+    $context['sandbox']['progress'] = 0;
+    $context['sandbox']['current_nid'] = 0;
+    $context['sandbox']['license_map'] = array(
+      59 => _ogamigrate_get_tid('CC-BY 3.0', $vocabs['licenses']->vid),
+      60 => _ogamigrate_get_tid('CC-BY-SA 3.0', $vocabs['licenses']->vid),
+      61 => _ogamigrate_get_tid('GPL 2.0', $vocabs['licenses']->vid),
+      62 => _ogamigrate_get_tid('GPL 3.0', $vocabs['licenses']->vid),
+      63 => _ogamigrate_get_tid('LGPL 2.1', $vocabs['licenses']->vid),
+      64 => _ogamigrate_get_tid('LGPL 3.0', $vocabs['licenses']->vid),
+      65 => _ogamigrate_get_tid('CC0', $vocabs['licenses']->vid),
+    );
+
+    print_r($context['sandbox']['license_map']);
+    $usermap = _ogamigrate_get_user_map();
+    $context['sandbox']['licenses'] = _ogamigrate_load_vocabulary($vocabs['licenses']->vid);
+    $context['sandbox']['art_types'] = _ogamigrate_load_vocabulary($vocabs['art_types']->vid);
+    $context['sandbox']['forums'] = _ogamigrate_load_vocabulary($vocabs['forums']->vid);
+    error_log(print_r($context['sandbox']['forums'], true));
+    
+    db_set_active('old');
+    $context['sandbox']['oldforums'] = _ogamigrate_load_old_vocabulary(2);
+    $context['sandbox']['max'] = db_query('select max(nid) from {node}')->fetchField();
+    
+    error_log("Processing nodes: {$context['sandbox']['vid']} {$context['sandbox']['max']}");
+  }
+
+  #print_r($usermap);
+
+  #while($context['sandbox']['current_nid'] < $context['sandbox']['max']) {
+    # Read node info
+  db_set_active('old');
+
+  $limit = 10;
+
+  $result = db_select('node')
+  ->fields('node', array('nid'))
+  ->condition('type', array('2d_graphic', '3d_art', 'audio', 'forum', 'blog', 'page', 'article', 'image', 'link', 'filepack'), 'in')
+  #->condition('type', array('image'), 'in')
+  ->orderBy('nid')
+  ->execute();
+
+  # Write node info
+  /*
+  foreach ($result as $row) {
+    print(".");
+    $context['sandbox']['current_nid'] = $row->nid;
+  }
+  print("\n");
+  */
+  foreach ($result as $row) {
+    //global $user;
+    //$uid = $user->uid;
+
+    print("Node {$nodeinfo->nid}:\n");
+
+    $nid = $row->nid;
+    db_set_active('old');
+
+    $nodeinfoquery = db_select('node')
+      ->fields('node', array('nid', 'type', 'title', 'uid', 'status', 'created', 'changed'))
+      ->condition('nid', $nid, '=')
+      ->condition('status', 1, '=')
+      ->execute();
+
+    foreach($nodeinfoquery as $nodeinfo) {
+      db_set_active('old');
+      _ogamigrate_load_node_revision($nodeinfo);
+      _ogamigrate_load_node_fields($nodeinfo, array('license_taxonomy', 'art_tags', 'genre'));
+      $uid = $usermap[$nodeinfo->uid];
+
+      #error_log("VID: {$nodeinfo->vid}");
+      #print("UID: {$nodeinfo->uid} -> $uid");
+      $node = new stdClass;
+      $node->is_new = true;
+      $node->nid = $nodeinfo->nid;
+      $node->title = $nodeinfo->title;
+      $node->body = array('und' => array(array('value' => $nodeinfo->body, 'format' => 'filtered_html')));
+      $node->comment = 2;
+
+      if(in_array($nodeinfo->type, array('blog', 'page', 'article', 'link', 'donation'))) {
+        $node->type = $nodeinfo->type;
+      } elseif($nodeinfo->type == 'article' || $nodeinfo->type == 'book') {
+        $node->type = 'page';
+      } elseif($nodeinfo->type == 'image' || $nodeinfo->type == 'filepack') {
+        $node->type = 'file';
+      } elseif($nodeinfo->type == 'forum') {
+        $node->taxonomy_forums = array('und' => array());
+        $node->type = 'forum';
+      } else {
+        $node->type = 'art';
+        $node->field_art_licenses = array('und' => array());
+        $node->field_art_preview = array('und' => array());
+        $node->field_art_files = array('und' => array());
+
+        $node->field_art_tags = array();
+        $node->field_art_tags['und'] = array();
+      }
+
+      print("{$nodeinfo->type} -> {$node->type}\n");
+      #node_object_prepare($node);
+
+      $node->created = $nodeinfo->created;
+      $node->changed = $nodeinfo->created;
+      $node->revision_timestamp = $nodeinfo->created;
+      $node->uid = $uid;
+
+      //$node->last_comment_uid = $uid;
+
+      //error_log("BODY: " . $node->body);
+      if($node->type == 'art') {
+        foreach($nodeinfo->license_taxonomy as $row) {
+          #error_log("LICENSE: " . print_r($row, true));
+          $tid = $context['sandbox']['license_map'][$row->field_license_taxonomy_value];
+          if($tid) {
+            array_push($node->field_art_licenses['und'], array('tid' => $tid));
+            #error_log("License: $tid");
+          }
+        }
+
+        _ogamigrate_node_add_tags($node, $nodeinfo, $context, 'art_tags', 10);
+        _ogamigrate_node_add_tags($node, $nodeinfo, $context, 'genre', 7);
+      } elseif($node->type == 'forum') {
+        db_set_active('old');
+        $oldforum = db_query('select tid from {forum} where nid = :nid', array(":nid" => $nodeinfo->nid))->fetchField();
+        $oldforum_name = $context['sandbox']['oldforums'][$oldforum];
+        $newforum = $context['sandbox']['forums'][$oldforum_name];
+        array_push($node->taxonomy_forums['und'], array('tid' => $newforum));
+        $node->forum_tid = $newforum;
+        error_log("Forum post: $oldforum -> $oldforum_name -> $newforum: " . $node->title);
+      } elseif($node->type == 'link') {
+        $node->field_weblink = array('und' => array());
+        $result = db_query('select field_weblink_url from content_type_link where vid = :vid', array(':vid' => $nodeinfo->vid));
+        foreach($result as $row) {
+          $url = $row->field_weblink_url;
+        }
+        $node->field_weblink['und'][0]['value'] = $url;
+      } elseif($node->type == 'file') {
+        $node->field_file = array('und' => array());
+        if($nodeinfo->type == 'filepack') {
+          print("File:\n");
+          
+          _ogamigrate_load_file_field($nodeinfo, 'files');
+          #print_r($nodeinfo->files);
+          foreach($nodeinfo->files as $row) {
+            #print_r($row);
+            $f = _ogamigrate_file_copy("$oldpath/" . $row->filepath, NULL, FILE_EXISTS_RENAME, $uid);
+            if($f->fid)
+              array_push($node->field_file['und'], _ogamigrate_file_array($f));
+          }
+        } elseif($nodeinfo->type == 'image') {
+          _ogamigrate_load_image_file($nodeinfo);
+          print("Image:\n");
+
+          foreach($nodeinfo->image as $row) {
+            #print_r($row);
+            $f = _ogamigrate_file_copy("$oldpath/" . $row->filepath, NULL, FILE_EXISTS_RENAME, $uid);
+            if($f->fid)
+              array_push($node->field_file['und'], _ogamigrate_file_array($f));
+          }
+        }
+      } elseif($node->type == 'page') {
+        $node->body['und'][0]['value'] = str_replace("internal:", "/", $node->body['und'][0]['value']);
+        $node->body['und'][0]['format'] = 'full_html';
+      }
+
+      db_set_active('old');
+
+      if($nodeinfo->type == '2d_graphic') {
+        _ogamigrate_load_node_field($nodeinfo, '2d_type');
+        _ogamigrate_load_file_fields($nodeinfo, array('image', 'preview', 'additional_previews'));
+
+        $types = _ogamigrate_node_add_tags($node, $nodeinfo, $context, '2d_type', 3);
+
+        # if it has the texture tag, art type should be 3
+        if(array_key_exists('Texture', $types)) {
+          $node->field_art_type['und'][0]['tid'] = $context['sandbox']['art_types']['Texture'];
+        } else {
+          $node->field_art_type['und'][0]['tid'] = $context['sandbox']['art_types']['2D Art'];
+        }
+
+        foreach($nodeinfo->image as $row) {
+          $f = _ogamigrate_file_copy("$oldpath/" . $row->filepath, NULL, FILE_EXISTS_RENAME, $uid);
+          if($f->fid)
+            array_push($node->field_art_files['und'], _ogamigrate_file_array($f));
+        }
+        foreach($nodeinfo->preview as $row) {
+          $f = _ogamigrate_file_copy("$oldpath/" . $row->filepath, NULL, FILE_EXISTS_RENAME, $uid);
+          if($f->fid)
+            array_push($node->field_art_preview['und'], _ogamigrate_file_array($f));
+        }
+        foreach($nodeinfo->additional_previews as $row) {
+          $f = _ogamigrate_file_copy("$oldpath/" . $row->filepath, NULL, FILE_EXISTS_RENAME, $uid);
+          if($f->fid)
+            array_push($node->field_art_preview['und'], _ogamigrate_file_array($f));
+        }
+      } elseif($nodeinfo->type == '3d_art') {
+        _ogamigrate_load_node_field($nodeinfo, '3d_type');
+        _ogamigrate_load_file_field($nodeinfo, '3d_model');
+        _ogamigrate_load_local_file_field($nodeinfo, 'required_preview', 'additional_previews');
+        _ogamigrate_node_add_tags($node, $nodeinfo, $context, '3d_type', 6);
+        $model = "3d_model";
+        foreach($nodeinfo->$model as $row) {
+          $f = _ogamigrate_file_copy("$oldpath/" . $row->filepath, NULL, FILE_EXISTS_RENAME, $uid);
+          if($f->fid)
+            array_push($node->field_art_files['und'], _ogamigrate_file_array($f));
+        }
+        foreach($nodeinfo->required_preview as $row) {
+          $f = _ogamigrate_file_copy("$oldpath/" . $row->filepath, NULL, FILE_EXISTS_RENAME, $uid);
+          if($f->fid)
+            array_push($node->field_art_preview['und'], _ogamigrate_file_array($f));
+        }
+        if(is_array($nodeinfo->additional_previews)) {
+          foreach($nodeinfo->additional_previews as $row) {
+            $f = _ogamigrate_file_copy("$oldpath/" . $row->filepath, NULL, FILE_EXISTS_RENAME, $uid);
+            if($f->fid)
+              array_push($node->field_art_preview['und'], _ogamigrate_file_array($f));
+          }
+        }
+
+        $node->field_art_type['und'][0]['tid'] = $context['sandbox']['art_types']['3D Art'];
+      } elseif($nodeinfo->type == 'audio') {
+        _ogamigrate_load_node_field($nodeinfo, 'audio_type');
+        _ogamigrate_load_file_field($nodeinfo, 'audio');
+        _ogamigrate_load_local_file_field($nodeinfo, 'audio_preview');
+        $types = _ogamigrate_node_add_tags($node, $nodeinfo, $context, 'audio_type', 4);
+
+        # if it has the Sound Effects tag, art type should be 6
+        if(array_key_exists('Sound Effects', $types)) {
+          $node->field_art_type['und'][0]['tid'] = $context['sandbox']['art_types']['Sound Effect'];
+        } else {
+          $node->field_art_type['und'][0]['tid'] = $context['sandbox']['art_types']['Music'];
+        }
+
+        foreach($nodeinfo->audio as $row) {
+          $f = _ogamigrate_file_copy("$oldpath/" . $row->filepath, NULL, FILE_EXISTS_RENAME, $uid);
+          if($f->fid)
+            array_push($node->field_art_files['und'], _ogamigrate_file_array($f));
+        }
+
+        /*  Let the new site handle the audio previews
+        foreach($nodeinfo->audio_preview as $row) {
+          $f = _ogamigrate_file_copy("$oldpath/" . $row->filepath, NULL, FILE_EXISTS_RENAME, $uid);
+          if($f->fid)
+            array_push($node->field_art_preview['und'], _ogamigrate_file_array($f));
+        }
+        */
+      }
+
+      db_set_active('default');
+      print("Processing nid $nid / {$context['sandbox']['max']} ({$nodeinfo->title}) vid: {$context['sandbox']['vid']}");
+      if(($node->type == 'forum' && $node->forum_tid) || $node->type != 'forum') {
+        node_save($node);
+        $newnid = db_query("select max(nid) from {node}")->fetchField();
+        $node->nid = $newnid;
+        db_set_active('default');
+        db_query("update {node} set changed = :changed where nid = :nid", array(':changed' => $nodeinfo->changed, ':nid' => $newnid));
+        $node->comment_count = _ogamigrate_comments($nodeinfo, $node, $usermap);
+        node_save($node);
+        db_set_active('default');
+      } else {
+        print($node->title . " (" . $nodeinfo->nid . ") had no forum ID\n");
+      }
+      print("\n");
+      $context['results'][] = $nid . ' : ' . $nodeinfo->title;
+      $context['sandbox']['current_nid'] = $nid;
+      $context['message'] = "Processing nid {$nid} / {$context['sandbox']['max']} ({$nodeinfo->title})";
+    }
+  }
+  
+  db_set_active('default');
+  #variable_set('comment_maintain_node_statistics', TRUE);
+  variable_set('oga_disable_events', FALSE);
+  variable_set('oga_skip_generate_preview', FALSE);
+}
+
+function _ogamigrate_clean_tags() {
+  db_set_active('default');
+  print("Cleaning unused taxonomy tags.\n");
+  $vocabs = taxonomy_vocabulary_get_names();
+  $vid = $vocabs['art_tags']->vid;
+
+  $terms = taxonomy_term_load_multiple(array(), array('vid' => $vid));
+  foreach($terms as $term) {
+    $nodes = taxonomy_select_nodes($term->tid, false, 1);
+    if(count($nodes) == 0) {
+      print("Deleting {$term->name}\n");
+      taxonomy_term_delete($term->tid);
+    }
+  }
+}
+
+function _ogamigrate_delete_forum($name) {
+  db_set_active('default');  
+  print("Deleting forum $name\n");
+  $vocabs = taxonomy_vocabulary_get_names();
+  $vid = $vocabs['forums']->vid;
+
+  $terms = taxonomy_term_load_multiple(array(), array('vid' => $vid, 'name' => $name));
+  foreach($terms as $term) {
+    taxonomy_term_delete($term->tid);
+  }
+}
+
+function _ogamigrate_favorites() {
+}
+
+function _ogamigrate_finished($success, $results, $operations) {
+  error_log('finished');
+  if ($success) {
+    $message = format_plural(count($results), 'One item processed.', '@count items processed.');
+  }
+  else {
+    $message = t('Finished with an error.');
+  }
+  drupal_set_message($message);
+  /*
+  // Providing data for the redirected page is done through $_SESSION.
+  foreach ($results as $result) {
+    $items[] = t('Loaded node %title.', array('%title' => $result));
+  }
+  $_SESSION['my_batch_results'] = $items;
+  */
+}
+
+function _ogamigrate_complete() {
+  $output = "<p>Migration complete.</p><p><a href='.'>Coconuts don't migrate!</a></p>";
+  return $output;
+}
+
+function _ogamigrate_load_node_fields(&$nodeinfo, $fields) {
+  foreach($fields as $field)
+    _ogamigrate_load_node_field($nodeinfo, $field);
+}
+
+function _ogamigrate_load_file_fields(&$nodeinfo, $fields) {
+  foreach($fields as $field)
+    _ogamigrate_load_file_field($nodeinfo, $field);
+}
+
+function _ogamigrate_load_node_revision(&$nodeinfo) {
+  db_set_active('old');
+  $nid = $nodeinfo->nid;
+  $vid = db_query('select max(vid) from {node_revisions} where nid = :nid', array(':nid' => $nid))->fetchField();
+  
+  try {
+    /*
+    $result = db_select('node_revisions')
+    ->fields('node_revisions', array('vid', 'body', 'teaser', 'format', 'log'))
+    ->condition('nid', $nid, '=')
+    ->condition('vid', $vid, '=')
+    ->execute();
+    */
+    $result = db_query("select vid, body, teaser, format, log from {node_revisions} where nid = :nid and vid = :vid", array(":nid" => $nid, ":vid" => $vid));
+  } catch (Exception $e) {
+    error_log("query failed: " . $e->getMessage());
+    error_log("query: " . $e->query_string);
+  } 
+  
+  foreach($result as $row) {
+    //error_log("BODY: " . $row->body);
+    $nodeinfo->vid = $vid;
+    $nodeinfo->body = $row->body;
+    $nodeinfo->teaser = $row->teaser;
+    $nodeinfo->format = $row->format;
+    $nodeinfo->log = $row->log;
+  }
+}
+
+function _ogamigrate_load_node_field(&$nodeinfo, $field) {
+  db_set_active('old');
+  print("Load node field: $field\n");
+  $table = "content_field_" . $field;
+  $vid = $nodeinfo->vid;
+  $fieldname = 'field_' . $field . '_value';
+  
+  #error_log("load_node_field: $nid / $field / $table");
+  
+  try {
+    /*
+    $result = db_select($table)
+      ->fields($table, array($fieldname, 'delta'))
+      ->condition('vid', $vid, '=')
+      ->orderBy('delta')
+      ->execute();
+    */
+    $result = db_query("select $fieldname, delta from {{$table}} where vid = :vid order by delta", array(":vid" => $vid));
+  } catch (Exception $e) {
+    error_log("query failed: " . $e->getMessage());
+    error_log("query: " . $e->query_string);
+  } 
+  
+  $nodeinfo->$field = $result;
+}
+
+function _ogamigrate_load_file_field(&$nodeinfo, $field) {
+  db_set_active('old');
+  print("Load file field: $field\n");
+  $table = "content_field_" . $field;
+  $vid = $nodeinfo->vid;
+  $fidfield = 'field_' . $field . '_fid';
+  
+  #error_log("Table: $table");
+  try {
+    /*
+    $result = db_select($table)
+      ->fields($table, array($fidfield, 'delta'))
+      ->condition('vid', $vid, '=')
+      #->leftJoin('files', 'files', "files.fid = $table.$fidfield")
+      #->fields('files', array('filename', 'filepath', 'filemime', 'status', 'timestamp'))
+      ->orderBy("$table.delta")
+      ->execute();
+    */
+    
+    $result = db_query("select filename, filepath, filemime, status from {{$table}} t, files where t.vid = :vid and files.fid = t.$fidfield", array(':vid' => $vid));
+  } catch (Exception $e) {
+    error_log("query failed: " . $e->getMessage());
+    error_log("query: " . $e->query_string);
+  } 
+  
+  $nodeinfo->$field = $result;
+}
+
+function _ogamigrate_load_image_file(&$nodeinfo) {
+  db_set_active('old');
+  $nid = $nodeinfo->nid;
+  print("Load image file: $nid\n");
+  
+  try {
+    $result = db_query("select filename, filepath, filemime, status from files, image where image.nid = :nid and files.fid = image.fid", array(':nid' => $nid));
+  } catch (Exception $e) {
+    error_log("query failed: " . $e->getMessage());
+    error_log("query: " . $e->query_string);
+  }
+
+  $nodeinfo->image = $result;
+}
+
+function _ogamigrate_load_local_file_field(&$nodeinfo, $field) {
+  db_set_active('old');
+  print("Load local file field: $field\n");
+  $table = "content_type_" . $nodeinfo->type;
+  $vid = $nodeinfo->vid;
+  $fidfield = 'field_' . $field . '_fid';
+  
+  try {
+    $result = db_query("select filename, filepath, filemime, status from {{$table}} t, files where t.vid = :vid and files.fid = t.$fidfield", array(':vid' => $vid));
+  } catch (Exception $e) {
+    error_log("query failed: " . $e->getMessage());
+    error_log("query: " . $e->query_string);
+  } 
+  
+  $nodeinfo->$field = $result;
+}
+
+function _ogamigrate_get_tid($term, $vid) {
+  db_set_active('default');
+  
+  $terms = taxonomy_term_load_multiple(array(), array('name' => $term, 'vid' => $vid));
+  //error_log("TERMS: " . print_r($terms, true));
+  
+  foreach($terms as $term) {
+    return $term->tid;
+  }
+}
+
+function _ogamigrate_load_vocabulary($vid) {
+  db_set_active('default');
+  
+  $terms = taxonomy_term_load_multiple(array(), array('vid' => $vid));
+  $vocab = array();
+  
+  foreach($terms as $term) {
+    $vocab[$term->name] = $term->tid;
+  }
+  
+  return $vocab;
+}
+
+function _ogamigrate_load_old_vocabulary($vid) {
+  db_set_active('old');
+  
+  $result = db_query("select name, tid from term_data where vid = :vid", array(":vid" => $vid));
+  
+  $vocab = array();
+  foreach($result as $row) {
+    $vocab[$row->tid] = $row->name;
+  }
+  
+  return $vocab;
+}
+
+function _ogamigrate_get_old_term($term, $vid) {
+  db_set_active('old');
+  
+  return db_query("select name from term_data where vid = :vid and tid = :tid", array(":vid" => $vid, ':tid' => $term))->fetchField();
+}
+
+function _ogamigrate_node_add_tags(&$node, &$nodeinfo, &$context, $field, $vid) {
+  $fieldname = "field_" . $field . "_value";
+  $keys = array();
+  foreach($nodeinfo->$field as $row) {
+    $old_term = _ogamigrate_get_old_term($row->$fieldname, $vid);
+    $keys[$old_term] = true;
+    $tid = _ogamigrate_get_tid($old_term, $context['sandbox']['vid']);
+    if($tid)
+      array_push($node->field_art_tags['und'], array('tid' => $tid));
+    #error_log("Tag ($field): " . $row->$fieldname . " -> $old_term -> $tid");
+  }
+  
+  return $keys;
+}
+
+function _ogamigrate_file_copy($source, $destination = NULL, $replace = FILE_EXISTS_RENAME, $uid = NULL) {
+  print("File copy $source -> $destination\n");
+  db_set_active('default');
+  if($uid == NULL) {
+    global $user;
+    $uid = $user->uid;
+  }
+  
+  if (empty($destination)) {
+    $destination = file_default_scheme() . '://';
+  }
+    
+  if (!file_valid_uri($destination)) {
+    error_log("The data could not be saved because the destination $destination is invalid. This may be caused by improper use of file_save_data() or a missing stream wrapper.");
+    return FALSE;
+  }
+
+  $destination = strtolower($destination . basename($source));
+  if ($uri = file_unmanaged_copy($source, $destination, $replace)) {
+    // Create a file object.
+    
+    $file = new stdClass();
+    $file->fid = NULL;
+    $file->uri = $uri;
+    $file->filename = basename($source);
+    $file->filemime = file_get_mimetype($file->uri);
+    $file->uid      = $uid;
+    $file->status   = FILE_STATUS_PERMANENT;
+    // If we are replacing an existing file re-use its database record.
+    if ($replace == FILE_EXISTS_REPLACE) {
+      $existing_files = file_load_multiple(array(), array('uri' => $uri));
+      if (count($existing_files)) {
+        $existing = reset($existing_files);
+        $file->fid = $existing->fid;
+        $file->filename = $existing->filename;
+      }
+    }
+    // If we are renaming around an existing file (rather than a directory),
+    // use its basename for the filename.
+    elseif ($replace == FILE_EXISTS_RENAME && is_file($destination)) {
+      $file->filename = basename($destination);
+    }
+    print("File copy $source -> {$file->filename}\n");
+    
+    //error_log("COPY: $source -> $uri ({$file->filename} / $destination)");
+    //print("Copy $source -> $destination ({$file->filename} uri:{$file->uri} dest:$destination)\n");
+    return file_save($file);
+  }
+  return FALSE;
+}
+
+function _ogamigrate_file_array($file) {
+  $f = get_object_vars($file);
+  $f['display'] = 1;
+  $f['status'] = 1;
+  
+  return $f;
+}
+
+function _ogamigrate_comments($oldnode, $newnode, $usermap) {
+  db_set_active('old');
+  $comments = db_query('select * from {comments} where nid = :nid', array(':nid' => $oldnode->nid));
+  db_set_active('default');
+  
+  $parents = array();
+  $count = 0;
+  
+  foreach($comments as $comment) {
+    $count++;
+    //error_log("Migrating comment {$comment->subject} for {$comment->nid}");
+    print(".");
+    $new = new stdClass;
+    $new->uid = $usermap[$comment->uid];
+    if($new->uid == '') $new->uid = 0;
+    $new->nid = $newnode->nid;
+    $new->pid = 0; //$parents[$comment->pid];
+    $new->subject = $comment->subject;
+    $new->comment_body = array('und' => array(0 => array('value' => $comment->comment, 'format' => 'filtered_html')));
+    $new->hostname = $comment->hostname;
+    $new->created = $comment->timestamp;
+    $new->changed = $comment->timestamp;
+    #$new->format = 'filtered_html';
+    $new->thread = $comment->thread;
+    $new->status = 1;
+    $new->name = $comment->name;
+    $new->mail = $comment->mail;
+    $new->homepage = $comment->homepage;
+    $new->language = 'und';
+
+    print_r($new);
+    comment_save($new);
+    #_comment_update_node_statistics($newnode->nid);
+  }
+
+  #variable_set('comment_maintain_node_statistics', TRUE);
+  #_comment_update_node_statistics($newnode->nid);
+  #variable_set('comment_maintain_node_statistics', FALSE);
+  
+  return $count;
+}
+
+function _ogamigrate_get_user_map() {
+  db_set_active('default');
+  $map = array();
+  $result = db_query("select uid from {users}");
+  foreach($result as $row) {
+    $account = user_load($row->uid);
+    $map[$account->field_oga1_uid['und'][0]['value']] = $row->uid;
+    #error_log(print_r($account->field_oga1_uid['und'][0]['value'], true));
+    #error_log($account->field_oga1_uid['und'][0]['value'] . " -> " . $uid);
+  }
+  
+  $map[1] = 1;
+  $map[0] = 0;
+  
+  return $map;
+}
+
+function _ogamigrate_setup_blocks() {
+  # TODO: Turn on all front page blocks
+  #_ogamigrate_activate_block('views', 'art-block_1', 'content', -24, '', '<front>', 1);
+  #_ogamigrate_activate_block('views', 'art-block_2', 'content', -23, '', '<front>', 1);
+  #_ogamigrate_activate_block('views', 'art-block_3', 'content', -21, '', '<front>', 1);
+  #_ogamigrate_activate_block('views', 'art-block_4', 'content', -20, '', '<front>', 1);
+  #_ogamigrate_activate_block('views', 'art-block_5', 'content', -22, '', '<front>', 1);
+  _ogamigrate_activate_block('views', 'art-block_6', 'content', -22, '', '<front>', 1);
+  _ogamigrate_activate_block('views', 'blog-block', 'content', 0, '', '<front>', 1);
+  _ogamigrate_activate_block('menu_block', 'menubar', 'menubar', 0, '<none>');
+  _ogamigrate_activate_block('oga', 'hello', 'topright', -22);
+  _ogamigrate_activate_block('oga', 'logout', 'topright', -22);
+  _ogamigrate_activate_block('oga', 'register', 'topright', -21);
+  _ogamigrate_activate_block('views', '-exp-art-search_art', 'menubar-right', -22, '', 'forum*');
+  _ogamigrate_activate_block('views', '-exp-forum_search-forum_search', 'menubar-right', -22, '', 'forum*', 1);
+  _ogamigrate_activate_block('views', '-exp-art-search_art_advanced', 'content', -22, '', 'art-search*', 1);
+  _ogamigrate_activate_block('user', 'login', 'topright', -22);
+  _ogamigrate_activate_block('system', 'navigation', BLOCK_REGION_NONE, 0);
+  _ogamigrate_activate_block('forum', 'new', 'left', 0);
+  _ogamigrate_activate_block('comment', 'recent', 'left', 1);
+  _ogamigrate_activate_block('menu', 'devel', 'left', 2);
+
+  _ogamigrate_activate_block('menu_block', 'menubar', 'menubar', 0, '<none>', '', 0, 'oga_theme_no_side_bar');
+  _ogamigrate_activate_block('oga', 'hello', 'topright', -22, '', '', 0, 'oga_theme_no_side_bar');
+  _ogamigrate_activate_block('oga', 'logout', 'topright', -22, '', '', 0, 'oga_theme_no_side_bar');
+  _ogamigrate_activate_block('views', '-exp-art-search_art', 'menubar-right', -22, '', 'forum*', 0, 'oga_theme_no_side_bar');
+  _ogamigrate_activate_block('views', '-exp-forum_search-forum_search', 'menubar-right', -22, '', 'forum*', 1, 'oga_theme_no_side_bar');
+  _ogamigrate_activate_block('views', '-exp-art-search_art_advanced', 'content', -22, '', 'art-search*', 1, 'oga_theme_no_side_bar');
+  _ogamigrate_activate_block('user', 'login', 'topright', -22, '', '', 0, 'oga_theme_no_side_bar');
+  _ogamigrate_activate_block('oga', 'register', 'topright', -21, '', '', 0, 'oga_theme_no_side_bar');
+  _ogamigrate_activate_block('system', 'navigation', BLOCK_REGION_NONE, 0, '', '', 0, 'oga_theme_no_side_bar');
+
+  _ogamigrate_block_role('oga', 'register', 1);
+  _ogamigrate_block_role('oga', 'hello', 2);
+  _ogamigrate_block_role('oga', 'logout', 2);
+}
+  
+
+function _ogamigrate_activate_block($module, $block, $region, $weight = 0, $title = '', $pages = '', $visibility = 0, $theme = 'oga_theme') {
+  print("Activating block $module:$block\n");
+  db_merge('block')
+  ->key(array('theme' => $theme, 'delta' => $block, 'module' => $module))
+  ->fields(array(
+    'region' => ($region == BLOCK_REGION_NONE ? '' : $region),
+    'pages' => trim($pages),
+    'status' => (int) ($region != BLOCK_REGION_NONE),
+    'visibility' => $visibility,
+    'weight' => $weight,
+    'title' => $title,
+  ))
+  ->execute();
+}
+
+function _ogamigrate_block_role($module, $block, $rid) {
+  #db_query("insert into {block_role} (module, delta, rid) values (%s, %s, %s)", array($module, $block, $rid));
+  db_insert('block_role')
+  ->fields(array(
+    'module' => $module,
+    'delta' => $block,
+    'rid' => $rid,
+  ))
+  ->execute();
+}
+
+function _ogamigrate_activate_view_modes() {
+  print("Activating view modes\n");
+  $entity_type = "node";
+  $bundle = "art";
+  $view_mode_name = "art_preview";
+  
+  $bundle_settings = field_bundle_settings($entity_type, $bundle);
+  $bundle_settings['view_modes'][$view_mode_name]['custom_settings'] = TRUE;
+  field_bundle_settings($entity_type, $bundle, $bundle_settings);
+}
+
+function _ogamigrate_backtrace() {
+  debug_print_backtrace();
+}
+
+function _ogamigrate_roles() {
+  $auth_role = user_role_load_by_name('authenticated user');
+  $anon_role = user_role_load_by_name('anonymous user');
+
+  user_role_grant_permissions($auth_role->rid,
+    array(
+      'access comments',
+      'access content',
+      'create art content',
+      'create art_collection content',
+      'create forum content',
+      'delete own art content',
+      'delete own art_collection content',
+      'delete own forum content',
+      'edit own art content',
+      'edit own art_collection content',
+      'edit own forum content',
+      'post comments',
+      'skip comment approval',
+      'use text format filtered_html',
+    )
+  );
+
+  user_role_grant_permissions($anon_role->rid,
+    array(
+      'access comments',
+      'access content',
+    )
+  );
+
+  $editor_role = new stdClass;
+  $editor_role->name = "editor";
+  user_role_save($editor_role);
+  $editor_role = user_role_load_by_name('editor');
+
+  user_role_grant_permissions($editor_role->rid,
+    array(
+      'create article content',
+      'create page content',
+      'delete any art content',
+      'delete any art_collection content',
+      'delete any art_event content',
+      'delete any forum content',
+      'delete own article content',
+      'delete own page content',
+      'edit any art content',
+      'edit any art_collection content',
+      'edit any art_event content',
+      'edit any forum content',
+      'edit own article content',
+      'edit own page content',
+      #'moderate spam in comments',
+      #'moderate spam in nodes of type Art',
+      #'moderate spam in nodes of type Art Collection',
+      #'moderate spam in nodes of type Art Event',
+      #'moderate spam in nodes of type Article',
+      #'moderate spam in nodes of type Basic page',
+      #'moderate spam in nodes of type Forum topic',
+      #'post with no antispam checking',
+      #'publish new art automatically',
+    )
+  );
+
+  $skip_role = new stdClass;
+  $skip_role->name = "skip moderation";
+  user_role_save($skip_role);
+  $skip_role = user_role_load_by_name('skip moderation');
+
+  user_role_grant_permissions($skip_role->rid,
+    array(
+      #'post with no antispam checking',
+      #'publish new art automatically',
+    )
+  );
+}
+
+function _ogamigrate_clear_nodes() {
+  db_set_active('default');
+  $result = db_select('node')
+  ->fields('node', array('nid'))
+  ->orderBy('nid')
+  ->execute();
+
+  foreach($result as $row) {
+    print("Deleting node {$row->nid}\n");
+    node_delete($row->nid);
+  }
+}

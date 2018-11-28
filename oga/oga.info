@@ -1,0 +1,18 @@
+name = OGA
+description = OGA site customizations.
+core = 7.x
+package = OGA
+
+files[] = oga.module
+files[] = oga.css
+dependencies[] = menu_block
+dependencies[] = medals
+dependencies[] = cck
+dependencies[] = references
+dependencies[] = node_reference
+dependencies[] = views
+dependencies[] = compact_forms
+dependencies[] = custom_formatters
+dependencies[] = cctag
+dependencies[] = entity
+

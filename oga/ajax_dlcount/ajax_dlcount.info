@@ -1,0 +1,7 @@
+name = Ajax Download Counter
+description = Uses AJAX to count downloads of files
+core = 7.x
+package = File
+scripts[] = ajax_dlcount.js
+configure = admin/config/content/ajax_dlcount
+dependencies[] = file

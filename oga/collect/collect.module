@@ -1,0 +1,266 @@
+<?php
+
+function collect_menu() {
+    $items['collect/%/%/%'] = array(
+        'title' => 'Collect',
+        'page callback' => '_collect_collect',
+        'page arguments' => array(1, 2, 3),
+        'access callback' => 'user_access',
+        'access arguments' => array('access content'),
+        'type' => MENU_CALLBACK,
+    );
+    
+    $items['collect-toggle/%/%/%'] = array(
+        'title' => 'Collect',
+        'page callback' => '_collect_toggle',
+        'page arguments' => array(1, 2, 3),
+        'access callback' => 'user_access',
+        'access arguments' => array('access content'),
+        'type' => MENU_CALLBACK,
+    );
+    
+    $items['collected/%/%'] = array(
+        'title' => 'Collected',
+        'page callback' => '_collect_collected',
+        'page arguments' => array(1, 2),
+        'access callback' => 'user_access',
+        'access arguments' => array('access content'),
+        'type' => MENU_CALLBACK,
+    );
+    
+    return $items;
+}
+
+function _collect_collected($nids, $collection) {
+    drupal_add_http_header('Content-Type', 'text/javascript; charset=utf-8');    
+    
+    $nids = explode(' ', $nids);
+    $result = array();
+    #print_r($nids);
+    foreach($nids as &$nid) {
+        $nid = intval($nid);
+        $result[$nid] = 0;
+    }
+    $allnids = implode(", ", $nids);
+    #print_r($allnids);
+    $rows = db_query("select field_collected_art_nid n, count(*) c from {field_data_field_collected_art} where entity_id = :collection and field_collected_art_nid in ($allnids) group by n", array('collection' => $collection));
+    #print_r($rows);
+    foreach($rows as $row) {
+        #print_r($row);
+        $count = $row->c;
+        if($count > 0) {
+            $result[$row->n] = 1;
+        } else {
+            $result[$row->n] = 0;
+        }
+    }
+    
+    print(drupal_json_encode($result));
+    exit;
+}
+
+function _collect_is_collected($nid, $collection) {
+    $count = db_query("select count(*) from {field_data_field_collected_art} where entity_id = :collection and field_collected_art_nid = :nid", array('collection' => $collection, 'nid' => $nid))->fetchField();
+    
+    if($count > 0) {
+        return true;
+    } 
+    return false;
+}
+
+function _collect_collect($action, $nid, $collection) {
+    // Only allow the user to update collections they have access to update
+    drupal_add_http_header('Content-Type', 'text/javascript; charset=utf-8');
+    
+    $access = _collect_access($action, $nid, $collection);
+    $result = '';
+    if(array_key_exists('OK', $access)) {
+        if($action == 'add') {
+            $c = node_load($collection);
+            if(!is_array($c->field_collected_art)) $c->field_collected_art = array();
+            $c->field_collected_art[LANGUAGE_NONE][] = array('nid' => $nid);
+            node_save($c);
+            $result .= "<div class='collect-message'>Added to {$c->title}</div>";
+        } elseif($action == 'remove') {
+            $c = node_load($collection);
+            if(!is_array($c->field_collected_art)) $c->field_collected_art = array();
+            foreach($c->field_collected_art[LANGUAGE_NONE] as $key => $item) {
+                if($item['nid'] == $nid) unset($c->field_collected_art[LANGUAGE_NONE][$key]);
+            }
+            node_save($c);
+            $result .= "<div class='collect-message'>Removed from {$c->title}</div>";
+        }
+    } else {
+        $result .= "<div class='collect-error collect-message'>{$access['ERROR']}</div>";
+    }
+        
+    $result = _collect_node_ui($nid, null, $result);
+    print(drupal_json_encode(array('result' => $result)));
+    exit;
+}
+
+function _collect_toggle($action, $nid, $collection) {
+    // Only allow the user to update collections they have access to update
+    drupal_add_http_header('Content-Type', 'text/javascript; charset=utf-8');
+    
+    $access = _collect_access($action, $nid, $collection);
+    $result = '';
+    if(array_key_exists('OK', $access)) {
+        if($action == 'add') {
+            $c = node_load($collection);
+            if(!is_array($c->field_collected_art)) $c->field_collected_art = array();
+            $c->field_collected_art[LANGUAGE_NONE][] = array('nid' => $nid);
+            node_save($c);
+            $result .= "Remove";
+        } elseif($action == 'remove') {
+            $c = node_load($collection);
+            if(!is_array($c->field_collected_art)) $c->field_collected_art = array();
+            foreach($c->field_collected_art[LANGUAGE_NONE] as $key => $item) {
+                if($item['nid'] == $nid) unset($c->field_collected_art[LANGUAGE_NONE][$key]);
+            }
+            node_save($c);
+            $result .= "Collect";
+        }
+    } 
+        
+    print(drupal_json_encode(array('result' => $result)));
+    exit;
+}
+
+function _collect_access($action, $nid, $collection) {
+    // This is handy, in that it works for collaborators too
+    $collection_node = node_load($collection);
+    if(!node_access('update', $collection_node)) return(array('ERROR' => 'Access denied.'));
+ 
+    // Can't add to a non-collecton
+    $type = db_query("select type from {node} where nid = :collection", array('collection' => $collection))->fetchField();
+    if($type != 'art_collection') return(array('ERROR' => 'Not a collection.'));
+         
+    // Cant add anything other than art or art collections to an art collection
+    $count = db_query("select count(*) from {node} where nid = :nid and type in ('art', 'art_collection')", array('nid' => $nid))->fetchField();
+    if($count == 0) return(array('ERROR' => 'Cannot collect this node type.'));
+        
+    // Make sure this isn't already collected
+    $count = db_query("select count(*) from {field_data_field_collected_art} where entity_id = :collection and field_collected_art_nid = :nid", array('collection' => $collection, 'nid' => $nid))->fetchField();
+    if($action == 'add' && $count > 0) return(array('ERROR' => 'Already in collection.'));
+    if($action == 'remove' && $count == 0) return(array('ERROR' => 'Not in colleciton.'));
+      
+    return array('OK' => true);
+}
+
+function _collect_node_toggle($nid) {
+    global $user;
+    if($user->uid == 0) return;
+    drupal_add_js(drupal_get_path('module', 'collect') . '/collect.js');
+    $output = "<div class='collect-toggle' style='display: none'><a href='javascript:void(0)' data-nid='$nid' class='collect-toggle-wait'></a></div>";
+    return $output;
+}
+
+function collect_form_views_exposed_form_alter(&$form, &$form_state, $form_id) {
+    if(!isset($form_state['view']) || $form_state['view']->current_display != 'search_art_advanced') return;
+    
+    global $user;
+    $uid = $user->uid;
+    
+    drupal_add_js(drupal_get_path('module', 'collect') . '/collect.js');
+    $collections = array('' => 'Select a collection');
+    
+    $result = db_query("(select n.nid, n.title from {field_data_field_collaborators} c, {node} n where c.bundle = 'art_collection' and n.type = 'art_collection' and c.entity_id = n.nid and c.field_collaborators_uid = :uid) union (select n.nid, n.title from {node} n where type = 'art_collection' and uid = :uid) order by 2", array('uid' => $uid));
+    foreach($result as $row) {
+        $collections[$row->nid] = $row->title;
+    } 
+    
+    if(count($collections) > 0) {
+        $form['collection'] = array(
+            '#name' => 'Collection',
+            '#title' => 'Collect into...',
+            '#type' => 'select',
+            '#options' => $collections,
+            '#attributes' => array('id' => 'collections-list'),
+        );
+    }         
+}
+
+function _collect_node_ui($nid, $default_collection = null, $message = null, $uid = null) {
+    // Default to current user
+    if(!$uid) {
+        global $user;
+        $uid = $user->uid;
+    }
+    //if($uid == 0) {
+        //return;
+    //}
+    
+    $output = "<div class='collect-container'>";
+    
+    // Get current collections
+    $links = array();
+    $ids = array();
+    $result = db_query("select n.title, n.nid from {field_data_field_collected_art} c, {node} n where c.field_collected_art_nid = :nid and n.nid = c.entity_id and n.type = 'art_collection' order by 1", array('nid' => $nid));
+    foreach($result as $row) {
+        $n = node_load($row->nid);
+        if(node_access('view', $n)) {
+            $link = l($row->title, "node/{$row->nid}");
+            if(node_access('update', $n)) {
+                $link .= " (" . l("remove", "collect/remove/$nid/{$row->nid}", array('attributes' => array('class' => 'collect-remove'))) . ")";
+            }
+            array_push($links, $link);
+            $ids[intval($row->nid)] = true;
+        }
+    }
+    
+    if(count($links) > 0) {
+        $output .= "<ul>";
+        foreach($links as $x) {
+            $output .= "<li>$x</li>";
+        }
+        $output .= "</ul>";
+    }
+    
+    // Print form for adding art to new collection
+    if($uid > 0) {
+        drupal_add_js(drupal_get_path('module', 'collect') . '/collect.js');
+        $collections = array();
+        
+ 
+        $result = db_query("(select n.nid, n.title from {field_data_field_collaborators} c, {node} n where c.bundle = 'art_collection' and n.type = 'art_collection' and c.entity_id = n.nid and c.field_collaborators_uid = :uid) union (select n.nid, n.title from {node} n where type = 'art_collection' and uid = :uid and n.nid not in (select d.field_download_collection_nid from {field_data_field_download_collection} d where entity_id = :uid)) order by 2", array('uid' => $uid));
+        
+        foreach($result as $row) {
+            if(!array_key_exists($row->nid, $ids))
+                $collections[$row->nid] = $row->title;
+        } 
+        
+        if(user_access('administer nodes')) {
+            $result = db_query("select n.nid, n.title from {node} n where type = 'art_collection' order by 2");
+            foreach($result as $row) {
+                if(!array_key_exists($row->nid, $ids))
+                    $collections[$row->nid] = $row->title;
+            } 
+        }
+        
+        if(count($collections) > 0) {
+            $form = array();
+            
+            $form['collection'] = array(
+                '#name' => 'Collection',
+                '#type' => 'select',
+                '#options' => $collections,
+                '#attributes' => array('id' => 'collections-list'),
+            );
+            
+            $form['submit'] = array(
+                '#name' => 'Collect',
+                '#value' => 'Add to Collection',
+                '#type' => 'button',
+                '#attributes' => array('id' => 'art-collect', 'data-nid' => $nid),
+            );
+            
+            $output .= drupal_render($form);
+        }
+    }
+    $output .= $message;
+    $output .= "</div>";
+        
+    return $output;
+}
+

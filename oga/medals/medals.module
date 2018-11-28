@@ -1,0 +1,341 @@
+<?php
+// $id$
+
+//select d.name, u.name from field_data_field_medals m, taxonomy_term_data d, users u where d.tid = m.field_medals_tid and u.uid = m.entity_id order by 1, 2;
+//select d.name, count(*) from field_data_field_medals m, taxonomy_term_data d where d.tid = m.field_medals_tid group by 1;
+
+
+/**
+ * @file
+ * The Medals module.
+ */
+
+function medals_permission() {
+  return array(
+    'administer medals' => array(
+      'title' => t('Administer medals'),
+      'description' => t('Manually add and remove medals from users'),
+    ),
+  );
+}
+
+function medals_field_formatter_info() {
+  return array(
+    'medals' => array(
+      'label' => 'Medals',
+      'field types' => array('taxonomy_term_reference'),
+    ),
+    'medals_best' => array(
+      'label' => 'Medals (Best Only)',
+      'field types' => array('taxonomy_term_reference'),
+    ),
+  );
+}
+
+function medals_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  $element = array();
+  drupal_add_css(drupal_get_path('module', 'medals') . '/medals.css');
+
+  switch ($display['type']) {
+    case 'medals':
+      foreach($items as $delta => $item) {
+        $output = '';
+        $term = taxonomy_term_load($item['tid']);
+        $output .= "<div class='medal-icon'>";
+        $output .= _medals_render_image($term);
+        $output .= "</div>";
+        $element[$delta] = array('#markup' => $output);  
+      }         
+      break;
+    case 'medals_best':
+      $exclude = array();
+      foreach($items as $medal) {
+        $parents = taxonomy_get_parents($medal['tid']);
+        foreach($parents as $parent) 
+          $exclude[$parent->tid] = true;
+      }
+      
+      foreach($items as $delta => $item) {
+        if(!array_key_exists($item['tid'], $exclude)) {
+          $output = '';
+          $term = taxonomy_term_load($item['tid']);
+          $output .= "<div class='medal-icon'>";
+          $output .= _medals_render_image($term);
+          $output .= "</div>";
+          array_push($element, array('#markup' => $output));
+        }
+      }         
+      break;
+  }
+  
+  return $element;
+}
+
+
+function _medals_render_image($term) {
+    $title = $term->name;
+    $points_required = 0;
+    if(is_array($term->field_points_required) && count($term->field_points_required) > 0) 
+        $points_required = $term->field_points_required['und'][0]['value'];
+    
+    if($points_required > 0) {
+        $points_type = taxonomy_term_load($term->field_points_type['und'][0]['tid']);
+        $title .= ": $points_required+ points in {$points_type->name}";
+    }
+    $title = htmlspecialchars($title);
+    if(is_array($term->field_medal_image) && array_key_exists('und', $term->field_medal_image)) {
+        $i = array_pop($term->field_medal_image['und']);
+        return "<img src='" . file_create_url($i['uri']) . "' alt='$title' title='$title'>";
+    } else {
+        return $name;
+    }
+}
+
+function medals_userpoints($op, $params) {
+  //dsm("OGA USERPOINTS INVOKED: $op");
+  //dsm($params);
+  
+  if(!variable_get('medals_disable_userpoints_hook', FALSE)) {
+    
+    if($op == 'points after') {
+      #_medals_award_medals($params['uid'], $params['tid']);
+
+      # Load and save the user account to trigger medals_user_presave()
+      $account = user_load($params['uid']);
+      _medals_update($account);
+    }
+  }
+}
+
+function medals_user_presave(&$edit, $account, $category) {
+  #dsm('medals_user_presave');
+  #if(!variable_get('medals_disable_presave', FALSE)) {
+  #  _medals_update($edit, $account);
+  #}
+
+}
+
+function _medals_update(&$account) {
+  $edit = array();
+  /*
+  if(!is_array($account->field_medals)) {
+    field_attach_load('user', $account, FIELD_LOAD_CURRENT, array('field_id' => 'field_medals'));
+  }
+  */
+  
+  $vocab_terms = taxonomy_vocabulary_load_multiple(array(), array('machine_name' => 'medals'));
+  $vocab = array_pop($vocab_terms);
+  $medals = taxonomy_term_load_multiple(array(), array('vid' => $vocab->vid));
+  #dsm($account, 'account');
+  #dsm($medals, 'all medals');
+  
+  $old_medals = array();
+  $new_medals = array();
+  
+  # Cache user's current medals in an array for quick lookup
+  if(property_exists($account, 'field_medals') && is_array($account->field_medals) && array_key_exists('und', $account->field_medals)) {
+    foreach($account->field_medals['und'] as $medal) {
+      $old_medals[$medal['tid']] = true;
+    }
+  }
+  
+  #dsm($old_medals, 'old medals');
+  $medals_changed = FALSE;
+  
+  foreach($medals as $medal) {
+    #dsm("Checking medal '{$medal->name}'");
+    $has_medal = FALSE;
+    $points_type = NULL;
+    
+    # Get user points and roles required
+    if(is_array($medal->field_points_type) && array_key_exists('und', $medal->field_points_type)) {
+      $points_type = $medal->field_points_type['und'][0]['tid'];
+    }
+    
+    if(is_array($medal->field_points_required) && array_key_exists('und', $medal->field_points_required)) {
+      $points_required = $medal->field_points_required['und'][0]['value'];
+    }
+    
+    $roles_required = array();
+    if(is_array($medal->field_role_required) && array_key_exists('und', $medal->field_role_required)) {
+      foreach($medal->field_role_required['und'] as $role) {
+        #dsm($role['value']);
+        $roles_required[$role['value']] = true;
+      }
+    }
+    
+    #dsm($roles_required, 'roles');
+    
+    # Check userpoints
+    if($points_type) {
+      $points = userpoints_get_current_points($account->uid, $points_type);
+      if($points >= $points_required) {
+        $has_medal = true;
+        #dsm("'{$medal->name}' awarded based on userpoints");
+      }
+    }
+     
+    # Check roles
+    if(count($roles_required) > 0 && is_array($account->roles)) {
+      foreach($account->roles as $role) {
+        if(array_key_exists($role, $roles_required)) {
+          $has_medal = true;
+          #dsm("'{$medal->name}' awarded based on role '$role'");
+        }
+      }
+    }
+    
+    # If the medal doesn't require points or a role, respect the current value.
+    if(!$points_type && count($roles_required) == 0 && array_key_exists($medal->tid, $old_medals)) {
+      $has_medal = true;
+    }
+    
+    if($has_medal && !array_key_exists($medal->tid, $old_medals)) {
+      module_invoke_all("medals_award", $account, $medal);
+      $medals_changed = TRUE;
+    }
+    
+    if(!$has_medal && array_key_exists($medal->tid, $old_medals)) {
+      module_invoke_all("medals_revoke", $account, $medal);
+      $medals_changed = TRUE;
+    }
+    
+    if($has_medal) {
+      array_push($new_medals, array('tid' => $medal->tid));
+    }
+  }
+
+  if($medals_changed) {
+    $edit['field_medals']['und'] = $new_medals;
+    user_save($account, $edit);
+  }
+}
+
+function medals_medals_award($account, $medal) {
+  global $user;
+  $msg = variable_get('medals_messages', 'drupal');
+
+  if($user->uid == $account->uid) {
+    $out = "You earned the medal '{$medal->name}'!";
+  } else {
+    $out = "{$account->name} earned the medal '{$medal->name}'!";
+  }
+  
+  if($msg == 'drupal')
+    drupal_set_message($out);
+  elseif($msg == 'terminal')
+    print("$out\n");
+}
+
+function medals_medals_revoke($account, $medal) {
+  $msg = variable_get('medals_messages', 'drupal');
+  global $user;
+  $msg = variable_get('medals_messages', 'drupal');
+
+  if($user->uid == $account->uid) {
+    $out = "You lost the medal '{$medal->name}'!";
+  } else {
+    $out = "{$account->name} lost the medal '{$medal->name}'!";
+  }
+
+  if($msg == 'drupal')
+    drupal_set_message($out);
+  elseif($msg == 'terminal')
+    print("$out\n");
+}
+
+function _medals_award_medals($uid, $tid) {
+  $points = userpoints_get_current_points($uid, $tid);
+  $account = user_load($uid);
+  //dsm($account);
+  //dsm($points);
+  #TODO: Convert this ugly mess to an EntityFieldQuery
+  #TODO: It would also make a lot of sense to award medals based on roles.
+  #TODO: ...and time as site members.
+  $query = "SELECT taxonomy_term_data.tid AS tid, taxonomy_term_data.name AS taxonomy_term_data_name, taxonomy_term_data.vid AS taxonomy_term_data_vid, taxonomy_vocabulary.machine_name AS taxonomy_vocabulary_machine_name,
+  field_data_field_points_required.field_points_required_value AS points_required
+  FROM 
+  {taxonomy_term_data} taxonomy_term_data
+  LEFT JOIN {field_data_field_points_type} field_data_field_points_type ON taxonomy_term_data.tid = field_data_field_points_type.entity_id AND (field_data_field_points_type.entity_type = 'taxonomy_term' AND field_data_field_points_type.deleted = 0)
+  LEFT JOIN {taxonomy_vocabulary} taxonomy_vocabulary ON taxonomy_term_data.vid = taxonomy_vocabulary.vid
+  LEFT JOIN {field_data_field_points_required} field_data_field_points_required ON
+  taxonomy_term_data.tid = field_data_field_points_required.entity_id
+  WHERE (( (field_data_field_points_type.field_points_type_tid = :tid) ))";
+  
+  $result = db_query($query, array(':tid' => $tid));
+  $edit['field_medals'] = $account->field_medals;
+  foreach($result as $row) {
+    //dsm($row);
+   
+    if($points >= $row->points_required) {
+      //dsm("Adding {$row->taxonomy_term_data_name}");
+      $add = true;
+      foreach($edit['field_medals']['und'] as $medal) {
+        if($medal['tid'] == $row->tid) {
+          $add = false;
+          break;
+        }
+      }
+      
+      if($add) {
+        array_push($edit['field_medals']['und'], array('tid' => $row->tid));
+        drupal_set_message("You earned the medal '{$row->taxonomy_term_data_name}'!");
+      }
+    } else {
+      //dsm("Removing {$row->taxonomy_term_data_name}");
+      $new_medals = array();
+      foreach($edit['field_medals']['und'] as $medal) {
+        if($medal['tid'] != $row->tid) {
+          array_push($new_medals, $medal);
+        } else {
+          drupal_set_message("You lost the medal '{$row->taxonomy_term_data_name}'");
+        }
+      }
+      
+      $edit['field_medals']['und'] = $new_medals;
+    }
+  }
+  //dsm($edit);
+  user_save($account, $edit);
+}
+
+function medals_form_user_profile_form_alter(&$form, &$form_state, $form_id) {
+  if(!user_access('administer medals')) 
+    unset($form['field_medals']);
+}
+
+function medals_award(&$account, $medal_name) {
+  $vocab = array_pop(taxonomy_vocabulary_load_multiple(array(), array('machine_name' => 'medals')));
+  $medal = array_pop(taxonomy_get_term_by_name($medal_name, $vocab->vid));
+  $has_medal = FALSE;
+  
+  // No need to give the medal to someone who already has it
+  foreach($account->field_medals['und'] as $m) {
+    if($m->tid == $medal->tid) {
+      $has_medal = TRUE;
+    }
+  }
+  
+  if(!$has_medal) {
+    $account->field_medals['und'][]['tid'] = $medal->tid;
+    module_invoke_all("medals_award", $account, $medal);
+  }
+}
+
+function medals_field_info() {
+}
+
+function medals_form_taxonomy_overview_terms_alter(&$form, &$form_state, $form_id) {
+  #dsm($form);
+/*
+  $children = element_children($form);
+  foreach($children as $c) {
+    $child =& $form[$c];
+    if(isset($child['#term']['tid'])) {
+      $tid = $child['#term']['tid'];
+      $child['icon'] =
+    }
+  }
+  */
+}
+

@@ -1,0 +1,1547 @@
+<?php
+
+function oga_field_formatter_info() {
+  return array(
+    'art_preview_small' => array(
+      'label' => 'Art Preview (Small)',
+      'field types' => array('file'),
+      'settings' => array('link' => ''),
+    ),
+    'art_preview_medium' => array(
+      'label' => 'Art Preview (Medium)',
+      'field types' => array('file'),
+      'settings' => array('link' => ''),
+    ),
+    'art_preview_large' => array(
+      'label' => 'Art Preview (Large)',
+      'field types' => array('file'),
+      'settings' => array('link' => ''),
+    ),
+    'texture_browse_preview' => array(
+      'label' => 'Texture Browse Preview',
+      'field types' => array('file'),
+      'settings' => array('link' => ''),
+    ),
+    'art_preview_multiple' => array(
+      'label' => 'Art Preview (Multiple)',
+      'field types' => array('file'),
+      'settings' => array('link' => ''),
+    ),
+    'files_with_preview' => array(
+      'label' => 'Files w/ Art Preview',
+      'field types' => array('file'),
+      'settings' => array('link' => ''),
+    ),
+  );
+}
+
+function oga_menu_alter(&$items) {
+  $items['forum']['menu_name'] = 'main-menu';
+  $items['forum']['weight'] = 1;
+}
+
+function oga_menu_block_blocks() {
+  // The array key is the block delta used by menu block.
+  return array(
+    'menubar' => array(
+      'menu_name'   => 'main-menu',
+      'parent_mlid' => 0,
+      'title_link'  => 0,
+      'admin_title' => 'Menu Bar',
+      'level'       => 1,
+      'follow'      => 0,
+      'depth'       => 0,
+      'expanded'    => 1,
+      'sort'        => 0,
+    ),
+  );
+}
+
+function oga_user_presave(&$edit, $account, $category) {
+  global $user;
+  if(user_is_anonymous() || $account->uid == $user->uid) {
+    $edit['field_remote_ip_address']['und'][0]['value'] = ip_address();
+    $edit['field_remote_hostname']['und'][0]['value'] = gethostbyaddr(ip_address());
+  }
+}
+
+function oga_views_data_alter(&$data) {
+  //uid_comment
+  $data['users']['uid_comment'] = array(
+    'relationship' => array(
+      'title' => t('Comments authored'),
+      'help' => t('Relate comments to the user who created it. This relationship will create one record for each comment created by the user.'),
+      'handler' => 'views_handler_relationship',
+      'base' => 'comment',
+      'base field' => 'uid',
+      'field' => 'uid',
+      'label' => t('comments'),
+    ),
+  );
+}
+
+function oga_form_user_profile_form_alter(&$form, &$form_state, $form_id) {
+  //dsm($form);
+  global $user;
+  if(!user_access('administer users')) {
+    unset($form['field_remote_hostname']);
+    unset($form['field_remote_ip_address']);
+    unset($form['field_download_collection']);
+  }
+  array_push($form['#validate'], 'oga_user_form_validate');
+  array_push($form['#after_build'], 'oga_user_form_after_build');
+}
+
+function oga_form_user_register_form_alter(&$form, &$form_state, $form_id) {
+  if(!isset($_GET['human']) || !$_GET['human']) drupal_goto('content/old-register-link', array(), 303);
+  
+  array_push($form['#validate'], 'oga_user_form_validate');
+  array_push($form['#after_build'], 'oga_user_form_after_build');
+}
+
+function oga_user_form_after_build($form, &$form_state) {
+  global $user;
+  $form['field_patreon_username']['und'][0]['#size'] = 12;
+  $form['field_patreon_username']['und'][0]['#field_prefix'] = 'http://www.patreon.com/';
+  $form['field_patreon_username']['und'][0]['value']['#size'] = 12;
+  $form['field_patreon_username']['und'][0]['value']['#field_prefix'] = 'http://www.patreon.com/';
+    
+  //if($user->uid == 1) dsm($form);
+  return $form;
+}
+
+function oga_geoip_lookup($ip = '') {
+  if($ip == '') $ip = ip_address();
+  static $GEOIP_CACHE = array();
+  
+  if(isset($GEOIP_CACHE[$ip])) {
+    return $GEOIP_CACHE[$ip];
+  }
+  
+  $link = "http://freegeoip.net/json/$ip";
+  $info = http_get($link, array("timeout"=>5));
+  $info = oga_http_parse_response($info);
+  $info = json_decode($info['Content'][0]);
+  //error_log("geoip lookup for $ip: " . print_r($info, TRUE));
+  return $info;
+}
+
+function oga_http_parse_response($header) {
+  $retVal = array();
+  $fields = explode("\r\n", preg_replace('/\x0D\x0A[\x09\x20]+/', ' ', $header));
+  foreach ($fields as $field) {
+
+    // Do not process empty cubrid_num_fields(result)
+    if (empty($field)) {
+      continue;
+    }
+
+    if (preg_match('/([^:]+): (.+)/m', $field, $match)) {
+      $match[1] = preg_replace('/(?<=^|[\x09\x20\x2D])./e', 'strtoupper("\0")', strtolower(trim($match[1])));
+      if( isset($retVal[$match[1]]) ) {
+        if (!is_array($retVal[$match[1]])) {
+          $retVal[$match[1]] = array($retVal[$match[1]]);
+        }
+        $retVal[$match[1]][] = $match[2];
+      }
+      else {
+        $retVal[$match[1]] = trim($match[2]);
+      }
+    }
+    else {
+      if (preg_match('/HTTP\//', $field)) {
+        // Following HTTP standards which are space-separated
+        preg_match('/(.*?) (.*?) (.*)/', $field, $matches);
+        $retVal['HTTP']['version'] = $matches[1];
+        $retVal['HTTP']['code'] = $matches[2];
+        $retVal['HTTP']['reason'] = $matches[3];
+      }
+      else {
+        $retVal['Content'][] = $field;
+      }
+    }
+  }
+  return $retVal;
+}
+
+function oga_user_form_validate($form, &$form_state) {
+  if(preg_match('/lpc/', $_SERVER['HTTP_HOST'])) {
+    form_set_error('name', 'User registrations are disabled on this site.');
+    return;
+  }
+  
+  $values = &$form_state['values'];
+  //dsm($values);
+  $project = trim(isset($values['field_user_project']['und'][0]['value']) ? $values['field_user_project']['und'][0]['value'] : '');
+  $website = trim(isset($values['field_user_project_website']['und'][0]['value']) ? $values['field_user_project_website']['und'][0]['value'] : '');
+  $description = trim(isset($values['field_user_project_description']['und'][0]['value']) ? $values['field_user_project_description']['und'][0]['value'] : '');
+  $realname = trim(isset($values['field_real_name']['und'][0]['value']) ? $values['field_real_name']['und'][0]['value'] : '');
+  $patreon = trim(isset($values['field_patreon_username']['und'][0]['value']) ? $values['field_patreon_username']['und'][0]['value'] : '');
+  $name = $values['name'];
+  
+  if($name == $project && $name == $website && $name == $description) {
+    //error_log("dupe");
+    form_set_error('name', "Oops!  It looks like your project, project website, and description are all the same as your username!  You must have made a mistake somewhere.");
+  }
+  
+  if(preg_match("/\bhref\b/", $description) || preg_match("/\[url/", $description) || preg_match("/\bhttps?\b/", $description)) {
+    form_set_error('field_user_project_description', 'Your project description may not contain any links.');
+  }
+  
+  if($website != '' && (!preg_match("/[a-zA-Z0-9]\.[a-zA-Z0-9]/", $website) || preg_match("/@/", $website))) {
+    //error_log("invalid website");
+    form_set_error('field_user_project_website', "Oops!  It looks like that's not a valid website.  If you don't have a website for your project, please leave that field blank.");
+  } elseif(fnmatch("*youtube.com/watch*", $website) || fnmatch("*youtu.be/*", $website)) {
+    //error_log("youtube website");
+    form_set_error('field_user_project_website', "Sorry.  We don't accept youtube videos as project websites.");
+  } elseif($website != '' && !preg_match("/^https?:\/\//", $website)) {
+    $values['field_user_project_website']['und'][0]['value'] = 'http://' . trim($values['field_user_project_website']['und'][0]['value']);
+  }
+  
+  if(preg_match("/[0-9]/", $realname)) {
+    form_set_error('field_real_name', "That doesn't look like a valid real name.  If you'd prefer not to enter your real name, please leave that field blank.");
+  }
+  
+  if(preg_match("/[\/\?=]/", $patreon)) {
+    form_set_error('field_patreon_username', "Your patreon link should not include any slashes or other special characters.");
+  }
+  
+  if(function_exists('_simple_regex_filter_do') && !user_access('skip regex filter')) {
+    $info = array(
+      'Username' => $form_state['values']['name'],
+      'Website' => $website,
+      'Project' => $project,
+      'Description' => $description,      
+      'Real Name' => $realname,
+      'Form' => $form['#id'],
+    );
+    if(_simple_regex_filter_do(array($project, $website, $description, $name), _simple_regex_get_filters(), $info)) {
+      //error_log("regex filter");
+      form_set_error('name', "There was an error while trying to create or update your account.  This shouldn't be happeneing, and if it does, we are <b>not aware of the problem</b>.  Please <a href='http://webchat.freenode.net/?channels=opengameart'>let us know via IRC</a> or mail <a href='mailto:admin@opengameart.org'>admin@opengameart.org</a>.");
+    }
+  }
+}
+
+function oga_user_update(&$edit, $account, $category) {
+  variable_set('user_approval_cache_invalid', TRUE);
+  global $user;
+  //dsm($user);
+  //dsm($edit);
+  //dsm($account);
+  $project = trim(isset($edit['field_user_project']['und'][0]['value']) ? $edit['field_user_project']['und'][0]['value'] : '');
+  $website = trim(isset($edit['field_user_project_website']['und'][0]['value']) ? $edit['field_user_project_website']['und'][0]['value'] : '');
+  $description = trim(isset($edit['field_user_project_description']['und'][0]['value']) ? $edit['field_user_project_description']['und'][0]['value'] : '');
+  
+  $oldproject = trim(isset($edit->original['field_user_project']['und'][0]['value']) ? $edit->original['field_user_project']['und'][0]['value'] : '');
+  $oldwebsite = trim(isset($edit->original['field_user_project_website']['und'][0]['value']) ? $edit->original['field_user_project_website']['und'][0]['value'] : '');
+  $olddescription = trim(isset($edit->original['field_user_project_description']['und'][0]['value']) ? $edit->original['field_user_project_description']['und'][0]['value'] : '');
+  //error_log("$project/$website/$description");
+  if(!user_access('skip regex filter')) {
+    $flag = flag_get_flag('user_approved');
+    if($project != '' || $website != '' || $description != '') {
+      if($project != $oldproject || $website != $oldwebsite || $description != $olddescription) {
+        $admin = user_load(1);
+        $flag->flag('unflag', $account->uid, $admin);
+      }
+    } else {
+      $admin = user_load(1);
+      $flag->flag('flag', $account->uid, $admin);
+    }
+  }
+}
+
+function oga_user_insert(&$edit, $account, $category) {
+  oga_user_update($edit, $account, $category);
+}
+
+function oga_field_formatter_settings_form($field, $instance, $view_mode, $form, &$form_state) {
+  $display = $instance['display'][$view_mode];
+  $formatter = $display['type'];
+  $settings = $display['settings'];
+  switch ($formatter) {
+    case 'art_preview_small':
+    case 'art_preview_medium':
+    case 'art_preview_large':
+    case 'art_preview_multiple':
+    case 'texture_browse_preview':
+      $form = array();
+      $form['link'] = array(
+        '#type' => 'checkbox',
+        '#title' => 'Link to parent node?',
+        '#default_value' => $settings['link'],
+      );
+      return $form;
+      break;
+    default:
+      return array();
+  }
+}
+
+function oga_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  $element = array();
+  //drupal_add_css(drupal_get_path('module', 'oga') . '/oga.css');
+  
+  $imagestyle = array(
+    'art_preview_small' => 'thumbnail',
+    'art_preview_medium' => 'art_preview_160x120',
+    'art_preview_large' => 'large',
+    'art_preview_multiple' => 'medium',
+    'texture_browse_preview' => 'texture_browse_preview',
+  );
+  
+  switch ($display['type']) {
+    case 'license':
+      foreach($items as $delta => $item) {
+        $output = '';
+        $term = taxonomy_term_load($item['tid']);
+        $output .= "<div class='license-icon'><a href='{$term->field_license_deed['und'][0]['value']}' target='_blank'>";
+        $output .= "<img src='" . file_create_url($term->field_license_image['und'][0]['uri']);
+        $output .= "' alt='{$term->field_license_image['und'][0]['alt']}' title='{$term->field_license_image['und'][0]['alt']}'><div class='license-name'>{$term->name}</div></a></div>";
+        $element[$delta] = array('#markup' => $output);
+      }      
+      break;
+    case 'art_preview_small':
+    case 'art_preview_medium':
+    case 'art_preview_large':
+    case 'texture_browse_preview':
+      $delta = 0;
+        if(is_array($items) && array_key_exists($delta, $items)) {
+        $item = $items[$delta];
+        $output = '';
+        $mime = explode('/', $item['filemime']);
+        #dsm($item);
+        if($mime[0] == 'image') {
+          #dsm($entity);
+          $path = drupal_get_path_alias("node/{$entity->nid}");
+          $output .= "<img src='" . file_create_url(image_style_path($imagestyle[$display['type']], $item['uri'])) . "'  alt='Preview'>";
+          $output = l($output, $path, array('html' => true));
+          $element[$delta] = array('#markup' => $output);
+        } elseif($mime[0] == 'audio' || $item['filemime'] == 'application/ogg') {
+          $element[$delta] = _oga_audio_preview($item, $mime, $entity_type, $entity, $field, $instance, $langcode, $items, $display, $imagestyle);
+        }
+      }
+      break;
+    case 'art_preview_multiple':
+    case 'files_with_preview':
+      if(count($items) > 0) {
+        $element['content_attributes'] = array('class' => array('art-preview-multiple'));
+
+        drupal_add_js(drupal_get_path('module', 'oga') . '/lightbox/js/jquery.lightbox-0.5.js');
+        drupal_add_css(drupal_get_path('module', 'oga') . '/lightbox/css/jquery.lightbox-0.5.css');
+        drupal_add_js('var lightbox_path="/'. drupal_get_path('module', 'oga') . '/lightbox";jQuery(document).ready(function () { jQuery("a.preview-lightbox").lightBox(); });', 'inline');
+      }
+
+      foreach($items as $delta => $item) {        
+        $output = '';
+        $mime = explode('/', $item['filemime']);
+        #dsm($item);
+        if($mime[0] == 'image') {
+          #dsm($entity);
+          $path = file_create_url($item['uri']);
+          $output .= "<img src='" . file_create_url(image_style_path($imagestyle['art_preview_multiple'], $item['uri'])) . "'  alt='Preview'>";
+          $output = l($output, $path,
+            array(
+              'html' => true,
+              'attributes' => array(
+                'class' => array('preview-lightbox'),
+              ),
+            )
+          );
+          $element[$delta] = array('#markup' => $output);
+        } elseif($mime[0] == 'audio' || $item['filemime'] == 'application/ogg') {
+          $element[$delta] = _oga_audio_preview($item, $mime, $entity_type, $entity, $field, $instance, $langcode, $items, $display, $imagestyle);
+        }
+        
+        if($display['type'] == 'files_with_preview') {
+          if(!isset($element[$delta])) {
+            $element[$delta]['#markup'] = '';
+          } else {
+            $element[$delta]['#markup'] .= '<br>';
+          }
+          $element[$delta]['#markup'] .= theme('file_link', array('file' => (object) $item)) . '<br>';
+        }
+        
+      }
+      break;
+  }
+  
+  return $element;
+}
+
+function _oga_audio_preview($item, $mime, $entity_type, $entity, $field, $instance, $langcode, $items, $display, $imagestyle) {
+  global $user;
+  if($user->uid == 1) {
+    #dsm($mime);
+    //error_log("audio preview");
+  }
+  
+  if($mime[1] != 'ogg') {
+    $ogg_uri = _oga_get_audio_preview_uri($item['uri'], 'ogg');
+  } else {
+    $ogg_uri = $item['uri'];
+  }
+
+  if($mime[1] != 'mp3' && $mime[1] != 'mpeg') {
+    $mp3_uri = _oga_get_audio_preview_uri($item['uri'], 'mp3');
+  } else {
+    $mp3_uri = $item['uri'];
+  }
+  
+	$mp3_url = file_create_url($mp3_uri);
+	$ogg_url = file_create_url($ogg_uri);
+	$img = file_create_url(_oga_get_audio_image_uri(image_style_path($imagestyle[$display['type']], $item['uri'])));
+  #image_style_path($imagestyle[$display['type']], $item['uri'])
+	$output = "<div class='{$display['type']} audio-preview' data-display-type='{$display['type']}'><div class='audio-preview-container display-type-{$imagestyle[$display['type']]}'><img class='audio-image' src='$img'><div class='play-button' data-ogg-url='$ogg_url' data-mp3-url='$mp3_url'></div></div></div>";
+	#$output = "<audio src='$url' controls='controls' class='{$display['type']}'></audio>";
+	#error_log($output);
+    if($user->uid == 1) {
+        #dsm($output);
+    }
+	return array('#markup' => $output);
+}
+
+// Add a new event record when art is inserted
+function oga_node_insert($node) {
+  if($node->type == 'art' && !variable_get("oga_disable_events")) {
+    //$event = _oga_create_event($node);
+    //node_save($event);
+  }
+
+
+  if($node->uid >= 1) {
+    if($node->type == 'art') {
+      /*
+      $type = $node->field_art_type['und'][0]['tid'];
+      $art_points_type = db_query("select tid from {taxonomy_term_data} t, {taxonomy_vocabulary} v where v.machine_name = 'userpoints' and t.vid = v.vid and t.name = 'Art - All'")->fetchField();
+      $points_type = db_query("select field_points_category_tid from {field_data_field_points_category} where entity_type = 'taxonomy_term' and entity_id = :type", array(':type' => $type))->fetchField();
+      $result = userpoints_userpointsapi(
+        array(
+          'points' => 1,
+          'uid' => $node->uid,
+          'tid' => $points_type,
+          'display' => TRUE,
+        )
+      );
+
+      $result = userpoints_userpointsapi(
+        array(
+          'points' => 1,
+          'uid' => $node->uid,
+          'tid' => $art_points_type,
+          'display' => TRUE,
+        )
+      );
+      */
+      $points_type = db_query("select t.name from {field_data_field_points_category} c, {taxonomy_term_data} t where c.entity_type = 'taxonomy_term' and c.entity_id = :type and c.field_points_category_tid = t.tid", array(':type' => $node->field_art_type['und'][0]['tid']))->fetchField();
+
+      _oga_award_points($node->uid, 'Art - All', 1);
+      _oga_award_points($node->uid, $points_type, 1);
+    } elseif($node->type == 'forum') {
+      _oga_award_points($node->uid, 'Talkative', 1);
+    }
+
+    if($node->type == 'art' && $node->field_art_type['und'][0]['tid'] == 14) { // texture
+      _oga_create_texture_nodes($node);
+    }
+  }
+}
+
+function oga_comment_insert($comment) {
+  if($comment->uid >= 1)_oga_award_points($comment->uid, 'Talkative', 1);
+}
+
+function _oga_award_points($uid, $type, $points) {
+  $points_type = db_query("select tid from {taxonomy_term_data} t, {taxonomy_vocabulary} v where v.machine_name = 'userpoints' and t.vid = v.vid and t.name = :type", array(':type' => $type))->fetchField();
+  $result = userpoints_userpointsapi(
+    array(
+      'points' => $points,
+      'uid' => $uid,
+      'tid' => $points_type,
+      'display' => TRUE,
+    )
+  );
+}
+
+// Add a new event record when art is revised
+function oga_node_update($node) {
+  if($node->type == 'art' && !variable_get("oga_disable_events")) {
+    $event = _oga_create_event($node, 'Revision');
+    node_save($event);
+  }
+
+  if($node->type == 'texture' && !variable_get("oga_disable_events")) {
+    if(count($node->field_texture_category) > 0 && count($node->original->field_texture_category) == 0) {
+      userpoints_userpointsapi(array(
+        'points' => $points,
+        'tid' => 5635, //texture organizer
+      ));
+    }
+  }
+}
+
+function oga_node_presave($node) {
+  if($node->type == 'art' && !variable_get("oga_skip_generate_preview")) {
+    _oga_generate_preview($node);
+  }
+  
+  /*
+  if($node->type == 'art') {
+    if(!$node->nid) {
+      $node->field_art_last_updated = array();
+      $node->field_art_last_updated['und'][0]['value'] = time();
+    } else {
+      foreach($node->field_art_files['und']
+    }
+  }
+  */
+}
+
+function _oga_generate_preview($node) {
+  #dsm("node presave");
+  $previews = $node->field_art_preview['und'];
+  #dsm($node);
+  #dsm($previews);
+  if(!is_array($previews) || count($previews) == 0) {
+    $art = file_load($node->field_art_files['und'][0]['fid']);
+    $mime = explode("/", $art->filemime);
+    #dsm($art);
+    if($mime[0] == 'image' || $mime[0] == 'audio' || $art->filemime == 'application/ogg') {
+      # If it's an image or audio file, just make the preview link to the first file
+      # submitted.
+      array_push($node->field_art_preview['und'], $node->field_art_files['und'][0]);
+    } elseif(0) {
+      # TODO: Decompress archives to temp and generate a composite preview.
+    }
+  }
+}
+
+function _oga_create_event($node, $event_type = 'Creation', $remix_nid = 0) {
+  $event = new stdClass;
+  $event->type = 'art_event';
+  node_object_prepare($event);
+  
+  $event->status = 1;
+  $event->field_art_node['und'][0]['nid'] = $node->nid;
+  $event->field_event_type['und'][0]['value'] = $event_type;
+  $event->field_art_preview = $node->field_art_preview;
+  $event->language = $node->language;
+  $event->created = $node->revision_timestamp;
+  $event->uid = $node->uid;
+  
+  if($event_type == 'Creation') {
+    $event->title = "'{$node->title}' created";
+  } elseif($event_type == 'Revision') {
+    $event->title = "'{$node->title}' updated";
+  } elseif($event_type == 'Remix') {
+    $event->title = "'{$node->title}' remixed";
+    $event->field_remix_link['und'][0]['nid'] = $remix_nid;
+  }
+
+  return $event;
+}
+
+
+// Some helper functions so my oga_flag function keeps working with the Flag 3 API. :p
+function oga_flag_flag($flag, $content_id, $account, $flagging) {
+  oga_flag('flag', $flag, $content_id, $account);
+}
+
+function oga_flag_unflag($flag, $content_id, $account, $flagging) {
+  oga_flag('unflag', $flag, $content_id, $account);
+}
+
+function oga_flag($action, $flag, $content_id, $account) {
+  #dsm("OGA FLAG: $action");
+  #dsm($flag);
+  #dsm($content_id);
+  #dsm($account);
+
+  if($action == 'flag' || $action = 'unflag') {
+    if($flag->name == 'favorites') {
+      cache_clear_all('oga_block_popular', 'cache');
+      if($action == 'flag') {
+        $points = 1;
+      } else {
+        $points = -1;
+      }
+    
+      $vocab = taxonomy_vocabulary_machine_name_load('userpoints');
+
+      $query = new EntityFieldQuery;
+      $terms = $query
+        ->entityCondition('entity_type', 'taxonomy_term')
+        ->propertyCondition('name', 'Aficionado')
+        ->propertyCondition('vid', $vocab->vid)
+        ->execute();
+
+      //$tids = taxonomy_term_load_multiple(array(), array(
+      //  'name' => 'Favorites',
+      //  'vocabulary_machine_name' => 'userpoints',
+      //));
+
+      //dsm($tids);
+      $tids = array_keys($terms['taxonomy_term']);
+      #dsm("IDs");
+      #dsm($tids);
+
+      userpoints_userpointsapi(array(
+        'points' => $points,
+        'tid' => $tids[0],
+      ));
+
+      $query = new EntityFieldQuery;
+      $terms = $query
+        ->entityCondition('entity_type', 'taxonomy_term')
+        ->propertyCondition('name', 'Popular')
+        ->propertyCondition('vid', $vocab->vid)
+        ->execute();
+
+      //$tids = taxonomy_term_load_multiple(array(), array(
+      //  'name' => 'Favorites',
+      //  'vocabulary_machine_name' => 'userpoints',
+      //));
+
+      //dsm($tids);
+      $tids = array_keys($terms['taxonomy_term']);
+      $uid = db_query("select uid from {node} where nid = :nid", array(":nid"=> $content_id))->fetchField();
+      userpoints_userpointsapi(array(
+        'points' => $points,
+        'tid' => $tids[0],
+        'uid' => $uid,
+      ));
+      
+      // Award favorites points in category.
+      
+      $points_type = db_query("select c.field_favorites_category_tid from {field_data_field_favorites_category} c, {field_data_field_art_type} f where c.entity_id = f.field_art_type_tid and f.entity_id = :nid", array(':nid' => $content_id))->fetchField();
+      if($points_type) {
+        //_oga_award_points($uid, $points_type, $points);
+        userpoints_userpointsapi(array(
+          'points' => $points,
+          'tid' => $points_type,
+          'uid' => $uid,
+        ));
+      }
+    }
+  }
+
+  if($flag->name == 'process_textures') {
+    $node = node_load($content_id);
+    if($node->type == 'art' && $node->field_art_type['und'][0]['tid'] == 14) { // texture
+      if($action == 'flag') {
+        $issueflag = flag_get_flag('licensing_issue');
+        if(!$issueflag->is_flagged($node->nid)) {
+          _oga_create_texture_nodes($node);
+        }
+      } elseif($action == 'unflag') {
+        _oga_delete_texture_nodes($node);
+      }
+    }
+  }
+} 
+
+# TODO: This should happen on node insert when the file is an audio file.
+# At the moment, it's creating a preview of the audio file, but the art
+# preview field isn't being filled in, so it's blank on the main form.
+
+function oga_file_insert($file) {
+  # If this is an audio file, kick off a background process to generate a preview
+  if(!variable_get("oga_skip_generate_preview")) {
+    #print($file->filename . ": " . $file->filemime . "\n");
+    $mime = explode("/", $file->filemime);
+    #dsm($file);
+    if($mime[0] == 'audio' || $file->filemime == 'application/ogg') {
+      $oggfile = drupal_realpath($file->uri);
+      $filename = basename($oggfile);
+      $dir = drupal_realpath(drupal_dirname($file->uri));
+      $newdir = "$dir/audio_preview";
+      #dsm($dir);
+      file_prepare_directory($newdir);
+      $oldfile = drupal_realpath($file->uri);
+      
+      if($mime[1] != 'ogg') {
+        #dsm("Converting audio...");
+        $newfile = "$newdir/$filename.ogg";
+        $cmd = "/usr/local/bin/sox " . _oga_escape($oldfile) . " " . _oga_escape($newfile);
+        #dsm($cmd);
+        #print($cmd);
+        $output = array();
+        if(!file_exists($newfile))
+            exec($cmd, $output);
+        $oggfile = $newfile;
+        #dsm($output);
+        #error_log($cmd);
+      }
+
+      if($mime[1] != 'mpeg' && $mime[1] != 'mp3') {
+        $newfile = "$newdir/$filename.mp3";
+        if(!file_exists($newfile))
+            $cmd = "/usr/local/bin/sox " . _oga_escape($oldfile) . " " . _oga_escape($newfile);
+        #dsm($cmd);
+        #print($cmd);
+        $output = array();
+        if(!file_exists($newfile))
+            exec($cmd, $output);
+        #dsm($output);
+        #error_log($cmd);
+      }
+
+      $imgfile = "$newdir/$filename.png";      
+      $cmd = "/usr/local/bin/audiopreview " . _oga_escape($oggfile) . " " . _oga_escape($imgfile) . " 160x120 2>&1";
+      $output = array();
+      #print($cmd);
+      if(!file_exists($imgfile))
+        exec($cmd, $output);
+      #error_log($cmd);
+      #error_log(implode("|", $output));
+    }
+  }
+}
+
+function _oga_generate_all_audio_previews($fid = 0) {
+  if($fid) {
+    $file = file_load($fid);
+    print($file->fid . ": " . $file->uri . "\n");
+    oga_file_insert($file);
+  } else {
+    $result = db_query("select fid from {file_managed} order by fid desc limit 100");
+    foreach($result as $row) {
+      $file = file_load($row->fid);
+      print($file->fid . ": " . $file->uri . "\n");
+      oga_file_insert($file);
+    }
+  }
+}
+
+function _oga_escape($string) {
+  $string = str_replace('"', '\"', $string);
+  $string = str_replace('$', '\$', $string);
+  return "\"$string\"";
+}
+
+function _oga_get_audio_preview_uri($uri, $format) {
+  $dir = drupal_dirname($uri);
+  $file = basename($uri);
+  $newuri = "$dir/audio_preview/$file.$format";
+  return $newuri;
+}
+
+function _oga_get_audio_image_uri($uri) {
+  $dir = drupal_dirname($uri);
+  $file = basename($uri);
+  $newuri = "$dir/audio_preview/$file.png";
+  return $newuri;
+}
+
+function oga_wysiwyg_editor_settings_alter(&$settings, $context) {
+  if ($context['profile']->editor == 'ckeditor') {
+    $settings['skin'] = 'kama';
+  }
+}
+
+function oga_block_info() {
+  $blocks = array();
+  $blocks['hello'] = array(
+    'info' => 'Mini block: Hello user!',
+    'cache' => DRUPAL_CACHE_PER_USER,
+  );
+  
+  $blocks['logout'] = array(
+    'info' => 'Mini block: Log out link',
+    'cache' => DRUPAL_CACHE_GLOBAL,
+  );
+  
+  $blocks['register'] = array(
+    'info' => 'Mini block: Register link',
+    'cache' => DRUPAL_CACHE_GLOBAL,
+  );
+
+  $blocks['popular'] = array(
+    'info' => 'Popular this Month',
+    'cache' => DRUPAL_CACHE_GLOBAL,
+  );
+
+  $blocks['topsubmitters'] = array(
+    'info' => 'Top Submitters',
+    'cache' => DRUPAL_CACHE_GLOBAL,
+  );
+
+  $blocks['texture_categories'] = array(
+    'info' => 'Texture Categories',
+    'cache' => DRUPAL_CACHE_GLOBAL,
+  );
+  
+  return $blocks;
+}
+
+function oga_block_view($delta) {
+  $block = array();
+  switch($delta) {
+    case 'hello':
+      global $user;
+      $block['content'] = 'Hello, ' . l("<strong>{$user->name}</strong>", drupal_get_path_alias('user/' . $user->uid), array('html' => true)) . '!';
+      break;
+    case 'logout':
+      $block['content'] = l('Log out', 'user/logout');
+      break;
+    case 'register':
+      $block['content'] = "<a href='#' onclick='window.location=\"/user/register?human=1\"'>Register</a>";
+      break;
+    case 'popular':
+      $block['subject'] = 'Popular This Month';
+      $block['content'] =  _oga_block_popular();
+      break;
+    case 'topsubmitters':
+      $block['subject'] = 'Favorite Submitters This Month';
+      $block['content'] =  _oga_block_top_submitters();
+      break;
+    case 'texture_categories':
+      $block['subject'] = 'Texture Categories';
+      $block['content'] = _oga_block_texture_categories();
+      break;
+  }
+  
+  return $block;
+}
+
+function oga_block_view_alter(&$data, $block) {
+  global $user;
+  if($block->module == 'simpleads') {
+    $data['content'] .= "<div class='awoga-link'><a href='/content/advertise-with-opengameartorg' target='_blank'>Advertise with OGA</a></div>";
+  }
+}
+
+function oga_url_outbound_alter(&$path, &$options, $original_path) {
+  if(preg_match('/^taxonomy\/term\/(\d+)$/', $path, $matches)) {
+    $query = db_select('taxonomy_term_data', 't');
+    $query->join('taxonomy_vocabulary', 'v', 'v.vid = t.vid');
+    $query->fields('t', array('tid', 'vid', 'name'))
+    ->fields('v', array('machine_name'))
+    ->condition('tid', $matches[1], '=');
+    $result = $query->execute();
+
+    foreach($result as $row) {
+      if($row->machine_name == 'art_types') {
+        $path = "art-search-advanced";
+        $options['alias'] = $path;
+        $options['query'] = array('field_art_type_tid[]' => $row->tid);
+      } elseif($row->machine_name == 'art_tags') {
+        $path = "art-search-advanced";
+        $options['alias'] = $path;
+        $options['query'] = array('field_art_tags_tid' => $row->name);
+      }
+    } 
+  }
+}
+
+function _oga_block_popular() {
+  $cache = cache_get('oga_block_popular');
+  
+  if($cache) {
+    return $cache->data;
+  }
+  
+  $output = '';
+  $days = 30;
+  $result = db_query('select f.entity_id as nid, n.title as title, count(*) as favorites from {flagging} f, {node} n where n.nid = f.entity_id and fid = 2 and timestamp > unix_timestamp() - :days * (60 * 60 * 24) and timestamp > unix_timestamp(\'2011-07-12\') group by entity_id order by 3 desc limit 10', array(':days' => $days));
+
+  $output .= "<div><table style='width: 100%'>";
+  $output .= "<tbody>";
+  $class = 'even';
+  
+  foreach($result as $row) {
+    if($class == 'odd')
+      $class = 'even';
+    else
+      $class = 'odd';
+
+    $longtitle = str_replace('"', '&quot;', $row->title);
+    if(strlen($row->title) > 40) {
+      $row->title = substr($row->title, 0, 38) . "...";
+    }
+
+    $path = drupal_get_path_alias("node/{$row->nid}");
+    $output .= "<tr class='$class' title=\"$longtitle\">";
+    $output .= "<td><a href='/$path'>{$row->title}</a></td>";
+    $output .= "<td style='text-align: right'>{$row->favorites}</td>";
+    $output .= "</tr>";
+  }
+
+  $output .= "</tbody>";
+  $output .= "</table></div>";
+  
+  cache_set('oga_block_popular', $output, time() + 86400);
+  return $output;
+}
+
+function _oga_block_top_submitters() {
+  $output = '';
+  $days = 30;
+  //$result = db_query("select u.name as user, u.uid as uid, count(*) as submissions from {node} n, {users} u where n.uid <> 0 and n.type = 'art' and n.uid = u.uid and n.created > unix_timestamp() - :days * (60 * 60 * 24) group by 1 order by 3 desc limit 10", array(':days' => $days));
+  
+  $result = db_query("select u.name as user, u.uid as uid, sum(f.count) as favorites from {node} n, {users} u, {flag_counts} f where n.uid <> 0 and n.type = 'art' and n.uid = u.uid and f.fid = 2 and f.entity_id = n.nid and n.created > unix_timestamp() - :days * (60 * 60 * 24) group by 1 order by 3 desc limit 10", array(':days' => $days));
+
+  $output .= "<div><table style='width: 100%'>";
+  $output .= "<tbody>";
+  $class = 'even';
+
+  foreach($result as $row) {
+    if($class == 'odd')
+      $class = 'even';
+    else
+      $class = 'odd';
+
+    $userlink = drupal_get_path_alias('user/' . $row->uid);
+    $output .= "<tr class='$class'>";
+    $output .= "<td><a href='/$userlink'>{$row->user}</a></td>";
+    $output .= "<td style='text-align: right'>{$row->favorites}</td>";
+    $output .= "</tr>";
+  }
+
+  $output .= "</tbody>";
+  $output .= "</table></div>";
+
+  return $output;
+}
+
+function _oga_calculate_points($start, $end) {
+  variable_set('medals_messages', 'terminal');
+  variable_set('medals_disable_userpoints_hook', TRUE);
+  
+  $result = db_query("select t.tid as tid, t.name as name from taxonomy_term_data t, taxonomy_vocabulary v where v.machine_name = 'userpoints' and v.vid = t.vid");
+
+  $cats = array();
+  foreach($result as $row) {
+    $cats[$row->name] = $row->tid;
+  }
+  print_r($cats);
+
+  $GLOBALS['cats_r'] = array_flip($cats);
+  print_r($GLOBALS['cats_r']);
+  
+  $result = db_select('users')
+  ->fields('users', array('uid'))
+  ->condition('uid', $start, '>=')
+  ->condition('uid', $end, '<=')
+  ->orderBy('uid')
+  ->execute();
+
+  foreach($result as $row) {
+    print_r($row);
+    $uid = $row->uid;
+
+    $account = user_load($uid);
+    print("Loaded user $uid ({$account->name})\n");
+
+    # Count their comments
+    $comments = db_query("select count(*) from {comment} where uid = :uid", array(':uid' => $uid))
+    ->fetchField();
+    $forumposts = db_query("select count(*) from {node} where uid = :uid and type = 'forum'", array(':uid' => $uid))
+    ->fetchField();
+    _oga_set_points($uid, $cats['Talkative'], $comments + $forumposts);
+
+    # Count their favorites
+    $favorites = db_query("select count(*) from {flag} f, {flagging} c where f.fid = c.fid and f.name = 'favorites' and c.uid = :uid", array(':uid' => $uid))
+    ->fetchField();
+    _oga_set_points($uid, $cats['Aficionado'], $favorites);
+
+    # Count the number of times they've been favorited
+    $popularity = db_query("select count(*) from {flag} f, {flagging} c, {node} n where f.fid = c.fid and c.entity_type = 'node' and f.name = 'favorites' and c.entity_id = n.nid and n.uid = :uid", array(':uid' => $uid))
+    ->fetchField();
+    _oga_set_points($uid, $cats['Popular'], $popularity);
+    
+    # Count the number of times they've been favorites for each art type
+    $pc = db_query("select count(*) as count, fc.field_favorites_category_tid as tid from {flagging} f, {flag} fn, {node} n, {field_data_field_art_type} t, {field_data_field_favorites_category} fc where t.entity_id = n.nid and t.entity_type = 'node' and f.entity_type = 'node' and fn.name = 'favorites' and f.entity_id = n.nid and fn.fid = f.fid and n.uid = :uid and fc.entity_id = t.field_art_type_tid group by 2;", array(':uid' => $uid));
+    foreach($pc as $fcat) {
+      _oga_set_points($uid, $fcat->tid, $fcat->count);
+    }
+    
+    # Count their art submissions
+    $art = db_query("select count(*) from {node} where uid = :uid and type = 'art'", array(':uid' => $uid))
+    ->fetchField();
+    _oga_set_points($uid, $cats['Art - All'], $popularity);
+
+    # Count each category of art submission
+    $q = db_query("select count(*) as count, d.name as name from {node} n, {field_data_field_art_type} t, {taxonomy_term_data} d where n.uid = :uid and n.type = 'art' and n.vid = t.revision_id and t.field_art_type_tid = d.tid group by d.name", array(':uid' => $uid));
+
+    $types = array();
+    foreach($q as $r) {
+      $types[$r->name] = $r->count;
+    }
+
+    _oga_set_points($uid, $cats['Art - 2D'], _oga_lookup($types, '2D Art'));
+    _oga_set_points($uid, $cats['Art - Concept Art'], _oga_lookup($types, 'Concept Art'));
+    _oga_set_points($uid, $cats['Art - 3D'], _oga_lookup($types, '3D Art'));
+    _oga_set_points($uid, $cats['Art - Documents'], _oga_lookup($types, 'Document'));
+    _oga_set_points($uid, $cats['Art - Music'], _oga_lookup($types, 'Music'));
+    _oga_set_points($uid, $cats['Art - Sound'], _oga_lookup($types, 'Sound Effect'));
+    _oga_set_points($uid, $cats['Art - Textures'], _oga_lookup($types, 'Texture'));
+
+    _medals_update($account);
+  }
+
+  variable_set('medals_messages', 'drupal');
+  variable_set('medals_disable_userpoints_hook', FALSE);
+}
+
+function _oga_lookup($array, $key) {
+  if(array_key_exists($key, $array)) {
+    return $array[$key];
+  } else {
+    return 0;
+  }
+}
+
+function _oga_set_points($uid, $type, $points = 0) {
+  global $_oga_cats_r;
+  print("  Setting $uid's points in type {$GLOBALS['cats_r'][$type]} to $points\n");
+  # Get existing points for user
+  $current = userpoints_get_current_points($uid, $type);
+  
+  # Subtract existing points from new points
+  $change = $points - $current;
+
+  # Add the result to existing points
+  if($change != 0) {
+    $result = userpoints_userpointsapi(array(
+        'points' => $change,
+        'uid' => $uid,
+        'tid' => $type,
+        'display' => FALSE,
+      )
+    );
+
+    if(!$result['status']) 
+      print("    {$result['reason']}\n");
+  }
+}
+
+function _oga_share_icons($title = null, $url = null) {
+  $icons = array(
+    'identica' => '/sites/default/files/archive/identica-24x24.png',
+    'reddit' => '/sites/default/files/archive/reddit-24x24.png',
+    'google+' => '/sites/default/files/archive/google%2B-24x24.png',
+    'twitter' => '/sites/default/files/archive/twitter-24x24.png',
+    'facebook' => '/sites/default/files/archive/facebook-24x24.png',
+  );
+
+  if(!$title) {
+    $title = drupal_get_title();
+  }
+  $title_clean = urlencode($title);
+  if(!$url) {
+    $url = 'http://' .$_SERVER['HTTP_HOST'] .$_SERVER['REQUEST_URI'];
+  }
+  $url_clean = urlencode($url);
+  $message = urlencode($title . " " . $url);
+
+  $html = "<div class='share-icons'>";
+
+  $html .= "<a href='https://identi.ca//index.php?action=newnotice&status_textarea=$message' title='identi.ca' target='_BLANK'><img src='{$icons['identica']}'></a> ";
+
+  $html .= "<a href='http://www.reddit.com/submit?url=$url_clean&title=$title_clean' title='Reddit' target='_BLANK'><img src='{$icons['reddit']}'></a> ";
+
+  $html .= "<a href='https://plus.google.com/share?url=$url_clean' title='Google+' target='_BLANK'><img src='{$icons['google+']}'></a> ";
+
+  $html .= "<a href='https://twitter.com/share?url=$url_clean&text=$title_clean' title='Twitter' target='_BLANK'><img src='{$icons['twitter']}'></a> ";
+
+  $html .= "<a href='https://www.facebook.com/sharer/sharer.php?u=$url_clean' title='Facebook' target='_BLANK'><img src='{$icons['facebook']}'></a> ";
+  
+  $html .= "</div>";
+  
+  return $html;
+}
+
+function oga_node_view($node, $view_mode, $langcode) {
+  // For some reason the search engines indexed art on lpc.opengameart.org.  We don't like this.
+  if($node->type == 'art' || $node->type == 'forum') {
+    if($_SERVER['SERVER_NAME'] == 'lpc.opengameart.org') {
+      drupal_goto('http://opengameart.org' . $_SERVER['REQUEST_URI'], array(), 301);
+      return;
+    }
+  }
+  
+  if($node->type == 'art') {
+    global $user;
+
+    $flag = $flag = flag_get_flag('licensing_issue');
+    if($flag->is_flagged($node->nid)) {
+      $node->licensing_issue = true;
+      $node->content['field_art_files'] = array(
+        '#markup' => '<div class="field-label">File(s):&nbsp;</div><div style="padding-left: 20px; font-style: italic;">File(s) currently unavalable due to potential licensing issues.  We apologize for the inconvenience, and are working to correct the issue.</div>'
+      );
+    }
+  }
+}
+
+function _oga_create_texture_nodes(&$node) {
+  #dsm($node);
+  cache_set('oga_block_texture_categories', FALSE, NULL, CACHE_TEMPORARY);
+  foreach($node->field_art_files['und'] as $findex => $f) {
+    $file = file_load($f['fid']);
+    if(_oga_file_is_archive($file->uri)) {
+      $dir = _oga_uncompress_archive($file->uri);
+      _oga_add_texture_files($node, $dir);
+    } else {
+      _oga_add_texture_file($node, $file->uri, $findex);
+    }
+  }
+}
+
+function _oga_uncompress_archive($uri) {
+  $path = drupal_realpath($uri);
+  error_log("Extracting '$path'");
+  $tmpdir = '/tmp/oga-' . time() . getmypid();
+  while(is_dir($tmpdir)) {
+    error_log("'$tmpdir' already exists");
+    $tmpdir .= "1";
+  }
+  mkdir($tmpdir);
+
+  $cmd = "/usr/bin/7za x -o$tmpdir " . _oga_escape($path);
+  //error_log($cmd);
+  exec($cmd);
+  
+  return $tmpdir;
+}
+
+function _oga_add_texture_files(&$basenode, $dir) {
+  error_log("_oga_add_texture_files: $dir");
+  $files = scandir($dir);
+  foreach($files as $file) {
+    error_log("file: $file");
+    if($file == '.' || $file == "..") continue;
+    if(is_dir("$dir/$file")) {
+      error_log("$dir/$file is a directory");
+      _oga_add_texture_files($basenode, "$dir/$file");
+    } elseif(_oga_file_is_archive("$dir/$file")) {
+      $newdir = _oga_uncompress_archive("$dir/$file");
+      _oga_add_texture_files($basenode, $newdir);
+    } else {
+      _oga_add_texture_file($basenode, "$dir/$file");
+    }
+  }
+
+  // Remove temp directory when done, preferably without accidentally blasting the whole site
+  if(preg_match("/^\/tmp\/oga-\d+$/", $dir)) {
+    exec("rm -rf " . _oga_escape($dir));
+  }
+}
+
+
+function _oga_get_image_data($image) {
+  $file = drupal_realpath($image);
+  $cmd = "/usr/bin/identify -format '%w %h %z %[channels] %k %A' " . _oga_escape(drupal_realpath($file)) . " 2>/dev/null";
+  //error_log($cmd);
+  $info = exec($cmd);
+}
+
+function _oga_add_texture_file(&$basenode, $file, $findex = -1) {
+  //dsm(func_get_args(), '_oga_add_texture_file');oga-133555757924791
+  error_log("_oga_add_texture_file " . $file);
+  $copy_fields = array('field_art_licenses', 'field_art_llicense_later', 'field_art_author', 'field_art_author_email', 'field_art_author_homepage', 'uid', 'status', 'comment');
+  
+  $mime = explode('/', file_get_mimetype($file));
+  $texture_directory = "public://oga-textures/" . $basenode->nid;
+  if(!file_prepare_directory($texture_directory, FILE_CREATE_DIRECTORY|FILE_MODIFY_PERMISSIONS)) {
+    error_log("Could not prepare directory: $texture_directory");
+  }
+  
+  if($mime[0] == 'image') {
+    $cmd = "/usr/bin/identify -format '%w %h %z %m' " . _oga_escape(drupal_realpath($file)) . " 2>/dev/null";
+    //error_log($cmd);
+    $info = exec($cmd);
+    //dsm($info);
+    
+    if($info) {
+      list($width, $height, $depth, $type) = explode(' ', $info);
+
+      // I hate BMPs.
+      if($type == 'BMP') {
+        global $user; if($user->uid == 1) {
+          error_log(print_r($file, true));
+        }
+
+        $pngfile = drupal_realpath($file) . ".png";
+
+        $cmd = "/usr/bin/convert " . _oga_escape(drupal_realpath($file)) . " " . _oga_escape($pngfile);
+
+        $file .= ".png";
+        error_log($cmd);
+        exec($cmd);        
+
+        $cmd = "/usr/bin/identify -format '%w %h %z %m' " . _oga_escape(drupal_realpath($file)) . " 2>/dev/null";
+        error_log($cmd);
+        $info = exec($cmd);
+        list($width, $height, $depth, $type) = explode(' ', $info);
+      }
+
+      $node = new stdClass;
+      $node->is_new = true;
+
+      foreach($copy_fields as $field) {
+        $node->$field = $basenode->$field;
+      }
+
+      $node->field_texture_art_node['und'][0]['nid'] = $basenode->nid;
+      $node->field_texture_width['und'][0]['value'] = $width;
+      $node->field_texture_height['und'][0]['value'] = $height;
+      $node->field_texture_bits['und'][0]['value'] = $depth;
+      $node->title = $basenode->title . " - " . basename($file);
+      $node->type = 'texture';
+      $node->body = '';
+      
+      if($findex >= 0) {
+        $f = get_object_vars(file_load($basenode->field_art_files['und'][$findex]['fid']));
+      } else {
+        $f = new stdClass();
+        $cd = getcwd();
+        $f->uri = file_unmanaged_copy(drupal_realpath($file), $texture_directory . '/' . strtolower(drupal_basename(drupal_realpath($file))), FILE_EXISTS_RENAME);
+        $f->filename = drupal_basename($f->uri);
+        $f->fid = NULL;
+        $f->filemime = file_get_mimetype($f->uri);
+        $f->uid = $node->uid;
+        $f->status = FILE_STATUS_PERMANENT;
+        $f = get_object_vars(file_save($f));
+      }
+      
+      $f['status'] = 1;
+      $f['display'] = 1;
+      $node->field_art_files['und'][] = $f;
+      
+      node_save($node);
+    }
+  } else {
+    error_log("Skipping " . implode("/", $mime));
+  }
+}
+
+function _oga_file_is_archive($file) {
+  $ext = strtolower(pathinfo(drupal_realpath($file), PATHINFO_EXTENSION));
+  return in_array($ext, array('zip', 'tar', 'gz', 'bz2', 'tar.gz', 'tar.bz2', 'tgz', 'tbz2', '7z', 'tar'));
+}
+
+function _oga_delete_texture_nodes(&$node) {
+  $nid = $node->nid;
+  $texnodes = db_query("select entity_id from {field_data_field_texture_art_node} n where n.field_texture_art_node_nid = :nid and bundle = 'texture'", array(':nid' => $nid))->fetchCol();
+  foreach($texnodes as $texnid) {
+    node_delete($texnid);
+  }   
+}
+
+function _oga_process_texture_nodes() {
+  $nids = db_query("select entity_id from {field_data_field_art_type} where field_art_type_tid = 14")->fetchCol();
+  $issueflag = flag_get_flag('licensing_issue');
+  $texflag = flag_get_flag('process_textures');
+  
+  foreach($nids as $nid) {
+    if(!$issueflag->is_flagged($nid) && !$texflag->is_flagged($nid)) {
+      $node = node_load($nid);
+      if($node->status == 1) {
+        print("$nid: {$node->title}\n");
+        $texflag->flag('flag', $nid, NULL, TRUE);
+      }
+    }
+  }
+}
+
+function _oga_block_texture_categories() {
+  $output = cache_get('oga_block_texture_categories');
+  if($output === FALSE) {
+    $output = '';
+    $vocabs = taxonomy_vocabulary_get_names();
+    $terms = taxonomy_get_tree($vocabs['texture_category']->vid, 0, 1);
+    $children = array();
+    $total = 0;
+    $output .= "<div class='texture-category-tree'>";
+    $output .= _oga_print_texture_tree($terms, $vocabs['texture_category']->vid, $children, $total);
+    $output .= "</div>";
+    $output .= "<div class='texture-categories-total'>$total categorized textures</div>";
+    $all = db_query("select count(*) from {node} where type = 'texture'")->fetchField();
+    $uncat = $all - $total;
+    if($uncat > 0) {
+      $output .= "<p><a href='/textures'>Uncategorized</a> ($uncat)</p>";
+    }
+    $output .= "<div class='texture-categories-total'>$all textures total</div>";
+    cache_set('oga_block_texture_categories', $output, NULL, CACHE_TEMPORARY);
+  } 
+  return $output;
+}
+
+function _oga_print_texture_tree(&$terms, $vid, &$children, &$total) {
+  if(!is_array($terms) || count($terms) == 0) return;
+  $output = '';
+  $children = array();
+
+  $output .= "<ul>";
+  foreach($terms as $term) {
+    if($term->name == 'NOT A TEXTURE') continue;
+    array_push($children, $term->tid);
+    $c = array();
+    $t = 0;
+    $level = taxonomy_get_tree($vid, $term->tid, 1);
+    $subtree = _oga_print_texture_tree($level, $vid, $c, $t);
+    $t += db_query("select count(*) from {field_data_field_texture_category} where field_texture_category_tid = :tid", array(':tid' => $term->tid))->fetchField();
+    $togglebutton = "<div class='subtree-toggle blank'></div>";
+    if($subtree) {
+      $togglebutton = "<div class='subtree-toggle closed'></div>";
+    }
+    array_unshift($c, $term->tid);
+    if($t > 0) {
+      $output .= "<li>$togglebutton&nbsp;<a href='/textures/" . implode("+", $c) . "'>{$term->name}</a> ($t)";
+      $output .= $subtree;
+      $output .= "</li>";
+    }
+    $children = array_merge($children, $c);
+    $total += $t;
+  }
+  $output .= "</ul>";
+
+  return $output;
+}
+
+function oga_query_comment_filter_alter($query) {
+  
+}
+
+function oga_metatag_metatags_view_alter(&$output, $instance) {
+  // Fix audio metatags so the preview points to an image.
+  if($instance == 'node:art') {
+    $node = menu_get_object();
+    $item = $node->field_art_preview['und'][0];
+    $mime = explode('/', $item['filemime']);
+    if($mime[0] == 'audio' || $item['filemime'] == 'application/ogg') {    
+      $img = file_create_url(_oga_get_audio_image_uri(image_style_path('audio_with_background', $item['uri'])));
+      $output['og:image']['#attached']['drupal_add_html_head'][0][0]['#value'] = $img;
+      $output['dcterms.type']['#attached']['drupal_add_html_head'][0][0]['#value'] = 'Sound';
+    }
+  }
+}
+
+function oga_ajax_dlcount($fid, $count) {
+  // Skip this if user is anonymous
+  global $user;
+  $LOG = false;
+  if($user->uid == 0) return;
+  
+  // Skip if this user has disabled download tracking
+  $flag = flag_get_flag('disable_download_tracking');
+  if($flag) {
+    if($flag->get_count($user->uid) > 0) return;
+  }
+  
+  $lock = "dl_collection_" . $user->uid;
+  
+  $tries = 0;
+  
+  if(!lock_acquire($lock, 60)) {
+    if($LOG) error_log("waiting for $lock");
+    if(lock_wait($lock, 30)) {
+      if($LOG) error_log("lock $lock not obtained");
+      return;
+    } else {
+      if($LOG) error_log("lock $lock available");
+      // Don't keep cycling.  If we can't get the lock this time, just forget about it.
+      if(!lock_acquire($lock, 60)) {
+        if($LOG) error_log("lock $lock could not be obtained");
+        return;
+      }
+    }
+  } else {
+    if($LOG) error_log("lock $lock acquired");
+  }
+
+  //$account = user_load($user->uid);
+  if($LOG) error_log("oga_ajax_dlcount: $fid");
+  
+  // Get node that file is in.
+  $nid = db_query("select entity_id from {field_data_field_art_files} where field_art_files_fid = :fid", array(':fid' => $fid))->fetchField();
+  
+  if($LOG) error_log("oga_ajax_dlcount node: $nid");
+  //if($user->uid == 1) error_log(print_r($account, true));
+  if($nid) {
+    // Check if the user has a default collection, and if not, create one for them.    
+    $collection_nid = db_query("select field_download_collection_nid from {field_data_field_download_collection} where entity_id = :uid and entity_type = 'user' and bundle = 'user'", array('uid' => $user->uid))->fetchField();
+    //if(is_array($account->field_download_collection) && isset($account->field_download_collection['und'][0]['nid'])) {
+    if($LOG) error_log("oga_ajax_dlcount collection: http://opengameart.org/node/" . $collection_nid);
+    if($collection_nid) {
+      $collection = node_load($collection_nid);
+      if($LOG) error_log("oga_ajax_dlcount collection loaded");
+    } 
+    
+    if(!$collection) {
+      if($LOG) error_log("oga_ajax_dlcount creating collection");
+      $account = user_load($user->uid);
+      $collection = _oga_create_art_collection();
+      $account->field_download_collection = array();
+      $account->field_download_collection['und'][0]['nid'] = $collection->nid;
+      field_attach_update('user', $account);
+      if($LOG) error_log("oga_ajax_dlcount created collection: http://opengameart.org/node/" . $collection->nid);
+    }
+        
+    // Add the art to the default collection.
+    if($collection) {
+      $collected = array();
+      if(!is_array($collection->field_collected_art)) {
+        $collection->field_collected_art = array();
+      } else {
+        foreach($collection->field_collected_art['und'] as $f) {
+          $collected[$f['nid']] = 1;
+        }
+      }
+      if($LOG) error_log("oga_ajax_dlcount collected art: " . print_r($collected, true));
+      if(!isset($collected[$nid])) {
+        $collection->field_collected_art['und'][]['nid'] = $nid;
+        if($LOG) error_log("oga_ajax_dlcount adding new item: http://opengameart.org/node/" . $nid);
+        field_attach_update('node', $collection);
+        entity_get_controller('node')->resetCache(array($collection->nid));
+        if($LOG) error_log("oga_ajax_dlcount item added");
+      }
+    } else {
+      if($LOG) error_log("oga_ajax_dlcount: Unable to get user download collection for " . $user->name);
+    }
+  }
+  
+  if($LOG) error_log("releasing $lock");
+  lock_release($lock);
+  if($LOG) error_log("lock $lock released");
+}
+
+function _oga_create_art_collection() {
+  global $user;
+  $LOG = false;
+  if($LOG) error_log("oga_ajax_dlcount: Creating download collection for " . $user->name);
+  $values = array(
+    'type' => 'art_collection',
+    'uid' => $user->uid,
+    'status' => 1,
+    'comment' => 1,
+    'promote' => 0,
+  );
+  
+  $entity = entity_create('node', $values);
+
+  $ewrapper = entity_metadata_wrapper('node', $entity);
+  $ewrapper->title->set($user->name . "'s Downloads");
+  $body_content = 'An automatically generated collection of downloads by ' . $user->name;
+  $ewrapper->body->set(array('value' => $body_content));
+  $node = $ewrapper->value();
+  $node->private = true;
+  $ewrapper->save();
+  
+  $nid = $ewrapper->getIdentifier();
+  if($LOG) error_log("oga_ajax_dlcount: Created download collection $nid ");
+  
+  // Make this node private
+  _flexiaccess_create_acl_rows($nid);
+  
+  // Give the current user full access
+  foreach (array('view','update','delete') as $op) {
+    $acl_id = acl_get_id_by_name('flexiaccess', $op.'_'.$nid);
+    if($LOG) error_log("oga_ajax_dlcount ACL ID: $acl_id");
+    acl_add_user($acl_id, $user->uid);
+  }
+  $ewrapper->save();
+  
+  if($LOG) error_log("oga_ajax_dlcount: acls updated for $nid ");
+  
+  return $ewrapper->value();
+}
+
+function _oga_make_dl_collections_private() {
+  $result = db_query("select field_download_collection_nid, entity_id from {field_data_field_download_collection} where field_download_collection_nid in (select nid from {node}) and entity_type = 'user'");
+  
+  foreach($result as $row) {
+    $uid = $row->entity_id;
+    $nid = $row->field_download_collection_nid;
+    $node = node_load($nid);
+    
+    print("$uid: $nid\n");
+    foreach (array('view','update','delete') as $op) {
+      $acl_id = acl_get_id_by_name('flexiaccess', $op.'_'.$nid);
+      print("  adding ACL ID: $acl_id\n");
+      acl_add_user($acl_id, $uid);
+    }
+    
+    node_save($node);
+  }
+}
+
+function oga_token_info() {
+  $info['tokens']['node']['ogp-preview'] = array(
+    'name' => t('OGP Preview'),
+    'description' => t('Preview file for Open Graph protocol'),
+  );
+
+  return $info;
+}
+
+function oga_tokens($type, $tokens, array $data = array(), array $options = array()) {
+  $url_options = array('absolute' => TRUE);
+  if (isset($options['language'])) {
+    $url_options['language'] = $options['language'];
+    $language_code = $options['language']->language;
+  }
+  else {
+    $language_code = NULL;
+  }
+  $sanitize = !empty($options['sanitize']);
+
+  $replacements = array();
+
+  if ($type == 'node' && !empty($data['node'])) {
+    $node = $data['node'];
+
+    foreach ($tokens as $name => $original) {
+      switch ($name) {
+        // Simple key values on the node.
+        case 'ogp-preview':
+          if(isset($node->field_art_preview) && is_array($node->field_art_preview) && isset($node->field_art_preview['und'][0]['uri'])) {
+            $replacements[$original] = file_create_url($node->field_art_preview['und'][0]['uri']);
+          }
+          break;
+      }
+    }
+  }
+
+  return $replacements;
+}
+
+function oga_node_update_index($node) {
+  if($node->type == 'art' && isset($node->field_art_tags['und'])) {
+    $tags = array();
+    foreach($node->field_art_tags['und'] as $t) {
+      $tags[] = $t['tid'];
+    }
+    $tags = db_query('select name from taxonomy_term_data where tid in (:tags)', array(':tags' => $tags))->fetchCol();
+    return implode(' ', $tags);
+  }
+}
+
+function oga_apachesolr_process_results(&$results, DrupalSolrQueryInterface $query) {
+  global $user;
+  
+  // Get ID list
+  $ids = array();
+  foreach($results as $r) {
+    if($r['bundle'] == 'art') array_push($ids, $r['fields']['entity_id']);
+  }
+  
+  if(count($ids) > 0) {
+    $qresult = db_query("select d.entity_id, f.fid, f.uri, f.filemime from field_data_field_art_preview d, file_managed f where d.bundle = 'art' and d.entity_type = 'node' and d.entity_id in (:ids) and f.fid = d.field_art_preview_fid", array(':ids' => $ids));
+  }
+  
+  $files = array();
+  foreach($qresult as $r) {
+    $files[$r->entity_id] = $r;
+  }
+  
+  foreach($results as $i => $r) {
+    $results[$i]['preview'] = $files[$r['fields']['entity_id']];
+  }
+  
+  if($user->uid == 1) {
+    //dsm($files);
+    //dsm($results);
+    //dsm($query);
+  }
+}

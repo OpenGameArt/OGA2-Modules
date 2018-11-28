@@ -1,0 +1,17 @@
+<?php
+
+// ajax_dlcount.install
+function ajax_dlcount_install() {
+  db_query('CREATE TABLE {file_dlcount} ( fid INTEGER REFERENCES {file_managed} (fid), count INTEGER )');
+  db_query('CREATE INDEX {file_dlcount}_fid_idx ON {file_dlcount} (fid)');
+  
+  db_query('CREATE TABLE {file_dlcount_history} ( fid INTEGER REFERENCES {file_managed} (fid), timestamp INTEGER, ip VARCHAR(20) )');
+  db_query('CREATE INDEX {file_dlcount_history}_fid_idx ON {file_dlcount_history} (fid)');
+  db_query('CREATE INDEX {file_dlcount_history}_ip_idx ON {file_dlcount_history} (ip)');
+  db_query('CREATE INDEX {file_dlcount_history}_timestamp_idx ON {file_dlcount_history} (timestamp)');
+};
+
+function ajax_dlcount_uninstall() {
+  db_query('DROP TABLE {file_dlcount}');
+  db_query('DROP TABLE {file_dlcount_history}');
+};

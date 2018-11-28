@@ -1,0 +1,7 @@
+name = Art Collection UI
+description = Allow users to build art collections.
+core = 7.x
+package = OGA
+
+dependencies[] = oga2
+ 

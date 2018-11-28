@@ -1,0 +1,6 @@
+name = Collaborate
+description = Allow users to collaborate on nodes.
+core = 7.x
+package = Miscellaneous
+
+dependencies[] = user_reference

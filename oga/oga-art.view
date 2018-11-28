@@ -1,0 +1,417 @@
+$view = new view;
+$view->name = 'art';
+$view->description = '';
+$view->tag = '';
+$view->base_table = 'node';
+$view->human_name = 'Art';
+$view->core = 7;
+$view->api_version = '3.0-alpha1';
+$view->disabled = FALSE; /* Edit this to true to make a default view disabled initially */
+
+/* Display: Defaults */
+$handler = $view->new_display('default', 'Defaults', 'default');
+$handler->display->display_options['use_ajax'] = TRUE;
+$handler->display->display_options['access']['type'] = 'none';
+$handler->display->display_options['cache']['type'] = 'time';
+$handler->display->display_options['cache']['results_lifespan'] = '300';
+$handler->display->display_options['cache']['output_lifespan'] = '300';
+$handler->display->display_options['query']['type'] = 'views_query';
+$handler->display->display_options['exposed_form']['type'] = 'basic';
+$handler->display->display_options['exposed_form']['options']['submit_button'] = 'Go';
+$handler->display->display_options['pager']['type'] = 'some';
+$handler->display->display_options['pager']['options']['items_per_page'] = '3';
+$handler->display->display_options['pager']['options']['offset'] = '0';
+$handler->display->display_options['style_plugin'] = 'grid';
+$handler->display->display_options['style_options']['row_class'] = 'art_view_row';
+$handler->display->display_options['style_options']['columns'] = '3';
+$handler->display->display_options['style_options']['fill_single_line'] = 1;
+$handler->display->display_options['row_plugin'] = 'fields';
+$handler->display->display_options['row_options']['hide_empty'] = 0;
+/* Field: Node: Path */
+$handler->display->display_options['fields']['path']['id'] = 'path';
+$handler->display->display_options['fields']['path']['table'] = 'node';
+$handler->display->display_options['fields']['path']['field'] = 'path';
+$handler->display->display_options['fields']['path']['exclude'] = TRUE;
+$handler->display->display_options['fields']['path']['alter']['alter_text'] = 0;
+$handler->display->display_options['fields']['path']['alter']['make_link'] = 0;
+$handler->display->display_options['fields']['path']['alter']['absolute'] = 0;
+$handler->display->display_options['fields']['path']['alter']['trim'] = 0;
+$handler->display->display_options['fields']['path']['alter']['word_boundary'] = 1;
+$handler->display->display_options['fields']['path']['alter']['ellipsis'] = 1;
+$handler->display->display_options['fields']['path']['alter']['strip_tags'] = 0;
+$handler->display->display_options['fields']['path']['alter']['html'] = 0;
+$handler->display->display_options['fields']['path']['element_label_colon'] = 1;
+$handler->display->display_options['fields']['path']['element_default_classes'] = 1;
+$handler->display->display_options['fields']['path']['hide_empty'] = 0;
+$handler->display->display_options['fields']['path']['empty_zero'] = 0;
+$handler->display->display_options['fields']['path']['absolute'] = 1;
+/* Field: Fields: field_art_preview */
+$handler->display->display_options['fields']['entity_id']['id'] = 'entity_id';
+$handler->display->display_options['fields']['entity_id']['table'] = 'field_data_field_art_preview';
+$handler->display->display_options['fields']['entity_id']['field'] = 'entity_id';
+$handler->display->display_options['fields']['entity_id']['label'] = '';
+$handler->display->display_options['fields']['entity_id']['alter']['alter_text'] = 0;
+$handler->display->display_options['fields']['entity_id']['alter']['make_link'] = 1;
+$handler->display->display_options['fields']['entity_id']['alter']['path'] = '[path]';
+$handler->display->display_options['fields']['entity_id']['alter']['absolute'] = 0;
+$handler->display->display_options['fields']['entity_id']['alter']['trim'] = 0;
+$handler->display->display_options['fields']['entity_id']['alter']['word_boundary'] = 1;
+$handler->display->display_options['fields']['entity_id']['alter']['ellipsis'] = 1;
+$handler->display->display_options['fields']['entity_id']['alter']['strip_tags'] = 0;
+$handler->display->display_options['fields']['entity_id']['alter']['html'] = 0;
+$handler->display->display_options['fields']['entity_id']['element_label_colon'] = 0;
+$handler->display->display_options['fields']['entity_id']['element_default_classes'] = 1;
+$handler->display->display_options['fields']['entity_id']['hide_empty'] = 0;
+$handler->display->display_options['fields']['entity_id']['empty_zero'] = 0;
+$handler->display->display_options['fields']['entity_id']['click_sort_column'] = 'fid';
+$handler->display->display_options['fields']['entity_id']['type'] = 'art_preview_medium';
+/* Field: Node: Title */
+$handler->display->display_options['fields']['title']['id'] = 'title';
+$handler->display->display_options['fields']['title']['table'] = 'node';
+$handler->display->display_options['fields']['title']['field'] = 'title';
+$handler->display->display_options['fields']['title']['label'] = '';
+$handler->display->display_options['fields']['title']['alter']['alter_text'] = 0;
+$handler->display->display_options['fields']['title']['alter']['make_link'] = 0;
+$handler->display->display_options['fields']['title']['alter']['absolute'] = 0;
+$handler->display->display_options['fields']['title']['alter']['trim'] = 1;
+$handler->display->display_options['fields']['title']['alter']['max_length'] = '15';
+$handler->display->display_options['fields']['title']['alter']['word_boundary'] = 0;
+$handler->display->display_options['fields']['title']['alter']['ellipsis'] = 1;
+$handler->display->display_options['fields']['title']['alter']['strip_tags'] = 0;
+$handler->display->display_options['fields']['title']['alter']['html'] = 0;
+$handler->display->display_options['fields']['title']['element_label_colon'] = 0;
+$handler->display->display_options['fields']['title']['element_default_classes'] = 1;
+$handler->display->display_options['fields']['title']['hide_empty'] = 0;
+$handler->display->display_options['fields']['title']['empty_zero'] = 0;
+$handler->display->display_options['fields']['title']['link_to_node'] = 1;
+/* Sort criterion: Node: Post date */
+$handler->display->display_options['sorts']['created']['id'] = 'created';
+$handler->display->display_options['sorts']['created']['table'] = 'node';
+$handler->display->display_options['sorts']['created']['field'] = 'created';
+$handler->display->display_options['sorts']['created']['order'] = 'DESC';
+/* Filter: Node: Type */
+$handler->display->display_options['filters']['type']['id'] = 'type';
+$handler->display->display_options['filters']['type']['table'] = 'node';
+$handler->display->display_options['filters']['type']['field'] = 'type';
+$handler->display->display_options['filters']['type']['value'] = array(
+  'art' => 'art',
+);
+/* Filter: Node: Published */
+$handler->display->display_options['filters']['status']['id'] = 'status';
+$handler->display->display_options['filters']['status']['table'] = 'node';
+$handler->display->display_options['filters']['status']['field'] = 'status';
+$handler->display->display_options['filters']['status']['value'] = '1';
+
+/* Display: Latest 2D Art */
+$handler = $view->new_display('block', 'Latest 2D Art', 'block_latest_2d_art');
+$handler->display->display_options['defaults']['title'] = FALSE;
+$handler->display->display_options['title'] = 'Latest 2D Art';
+$handler->display->display_options['defaults']['filters'] = FALSE;
+/* Filter: Node: Type */
+$handler->display->display_options['filters']['type']['id'] = 'type';
+$handler->display->display_options['filters']['type']['table'] = 'node';
+$handler->display->display_options['filters']['type']['field'] = 'type';
+$handler->display->display_options['filters']['type']['value'] = array(
+  'art' => 'art',
+);
+/* Filter: Node: Published */
+$handler->display->display_options['filters']['status']['id'] = 'status';
+$handler->display->display_options['filters']['status']['table'] = 'node';
+$handler->display->display_options['filters']['status']['field'] = 'status';
+$handler->display->display_options['filters']['status']['value'] = '1';
+/* Filter: Taxonomy: Term */
+$handler->display->display_options['filters']['name']['id'] = 'name';
+$handler->display->display_options['filters']['name']['table'] = 'taxonomy_term_data';
+$handler->display->display_options['filters']['name']['field'] = 'name';
+$handler->display->display_options['filters']['name']['value'] = '2D Art';
+/* Filter: Taxonomy: Vocabulary */
+$handler->display->display_options['filters']['vid']['id'] = 'vid';
+$handler->display->display_options['filters']['vid']['table'] = 'taxonomy_term_data';
+$handler->display->display_options['filters']['vid']['field'] = 'vid';
+$handler->display->display_options['filters']['vid']['value'] = array(
+  3 => '3',
+);
+
+/* Display: Latest 3D Art */
+$handler = $view->new_display('block', 'Latest 3D Art', 'block_latest_3d_art');
+$handler->display->display_options['defaults']['title'] = FALSE;
+$handler->display->display_options['title'] = 'Latest 3D Art';
+$handler->display->display_options['defaults']['filters'] = FALSE;
+/* Filter: Node: Type */
+$handler->display->display_options['filters']['type']['id'] = 'type';
+$handler->display->display_options['filters']['type']['table'] = 'node';
+$handler->display->display_options['filters']['type']['field'] = 'type';
+$handler->display->display_options['filters']['type']['value'] = array(
+  'art' => 'art',
+);
+/* Filter: Node: Published */
+$handler->display->display_options['filters']['status']['id'] = 'status';
+$handler->display->display_options['filters']['status']['table'] = 'node';
+$handler->display->display_options['filters']['status']['field'] = 'status';
+$handler->display->display_options['filters']['status']['value'] = '1';
+/* Filter: Taxonomy: Term */
+$handler->display->display_options['filters']['name']['id'] = 'name';
+$handler->display->display_options['filters']['name']['table'] = 'taxonomy_term_data';
+$handler->display->display_options['filters']['name']['field'] = 'name';
+$handler->display->display_options['filters']['name']['value'] = '3D Art';
+/* Filter: Taxonomy: Vocabulary */
+$handler->display->display_options['filters']['vid']['id'] = 'vid';
+$handler->display->display_options['filters']['vid']['table'] = 'taxonomy_term_data';
+$handler->display->display_options['filters']['vid']['field'] = 'vid';
+$handler->display->display_options['filters']['vid']['value'] = array(
+  3 => '3',
+);
+
+/* Display: Latest Textures */
+$handler = $view->new_display('block', 'Latest Textures', 'block_latest_textures');
+$handler->display->display_options['defaults']['title'] = FALSE;
+$handler->display->display_options['title'] = 'Latest  Textures';
+$handler->display->display_options['defaults']['filters'] = FALSE;
+/* Filter: Node: Type */
+$handler->display->display_options['filters']['type']['id'] = 'type';
+$handler->display->display_options['filters']['type']['table'] = 'node';
+$handler->display->display_options['filters']['type']['field'] = 'type';
+$handler->display->display_options['filters']['type']['value'] = array(
+  'art' => 'art',
+);
+/* Filter: Node: Published */
+$handler->display->display_options['filters']['status']['id'] = 'status';
+$handler->display->display_options['filters']['status']['table'] = 'node';
+$handler->display->display_options['filters']['status']['field'] = 'status';
+$handler->display->display_options['filters']['status']['value'] = '1';
+/* Filter: Taxonomy: Term */
+$handler->display->display_options['filters']['name']['id'] = 'name';
+$handler->display->display_options['filters']['name']['table'] = 'taxonomy_term_data';
+$handler->display->display_options['filters']['name']['field'] = 'name';
+$handler->display->display_options['filters']['name']['value'] = 'Texture';
+/* Filter: Taxonomy: Vocabulary */
+$handler->display->display_options['filters']['vid']['id'] = 'vid';
+$handler->display->display_options['filters']['vid']['table'] = 'taxonomy_term_data';
+$handler->display->display_options['filters']['vid']['field'] = 'vid';
+$handler->display->display_options['filters']['vid']['value'] = array(
+  3 => '3',
+);
+
+/* Display: Latest Music */
+$handler = $view->new_display('block', 'Latest Music', 'block_latest_music');
+$handler->display->display_options['defaults']['title'] = FALSE;
+$handler->display->display_options['title'] = 'Latest  Music';
+$handler->display->display_options['defaults']['filters'] = FALSE;
+/* Filter: Node: Type */
+$handler->display->display_options['filters']['type']['id'] = 'type';
+$handler->display->display_options['filters']['type']['table'] = 'node';
+$handler->display->display_options['filters']['type']['field'] = 'type';
+$handler->display->display_options['filters']['type']['value'] = array(
+  'art' => 'art',
+);
+/* Filter: Node: Published */
+$handler->display->display_options['filters']['status']['id'] = 'status';
+$handler->display->display_options['filters']['status']['table'] = 'node';
+$handler->display->display_options['filters']['status']['field'] = 'status';
+$handler->display->display_options['filters']['status']['value'] = '1';
+/* Filter: Taxonomy: Term */
+$handler->display->display_options['filters']['name']['id'] = 'name';
+$handler->display->display_options['filters']['name']['table'] = 'taxonomy_term_data';
+$handler->display->display_options['filters']['name']['field'] = 'name';
+$handler->display->display_options['filters']['name']['value'] = 'Music';
+/* Filter: Taxonomy: Vocabulary */
+$handler->display->display_options['filters']['vid']['id'] = 'vid';
+$handler->display->display_options['filters']['vid']['table'] = 'taxonomy_term_data';
+$handler->display->display_options['filters']['vid']['field'] = 'vid';
+$handler->display->display_options['filters']['vid']['value'] = array(
+  3 => '3',
+);
+
+/* Display: Latest SFX */
+$handler = $view->new_display('block', 'Latest SFX', 'block_latest_sfx');
+$handler->display->display_options['defaults']['title'] = FALSE;
+$handler->display->display_options['title'] = 'Latest SFX';
+$handler->display->display_options['defaults']['filters'] = FALSE;
+/* Filter: Node: Type */
+$handler->display->display_options['filters']['type']['id'] = 'type';
+$handler->display->display_options['filters']['type']['table'] = 'node';
+$handler->display->display_options['filters']['type']['field'] = 'type';
+$handler->display->display_options['filters']['type']['value'] = array(
+  'art' => 'art',
+);
+/* Filter: Node: Published */
+$handler->display->display_options['filters']['status']['id'] = 'status';
+$handler->display->display_options['filters']['status']['table'] = 'node';
+$handler->display->display_options['filters']['status']['field'] = 'status';
+$handler->display->display_options['filters']['status']['value'] = '1';
+/* Filter: Taxonomy: Term */
+$handler->display->display_options['filters']['name']['id'] = 'name';
+$handler->display->display_options['filters']['name']['table'] = 'taxonomy_term_data';
+$handler->display->display_options['filters']['name']['field'] = 'name';
+$handler->display->display_options['filters']['name']['value'] = 'Sound Effect';
+/* Filter: Taxonomy: Vocabulary */
+$handler->display->display_options['filters']['vid']['id'] = 'vid';
+$handler->display->display_options['filters']['vid']['table'] = 'taxonomy_term_data';
+$handler->display->display_options['filters']['vid']['field'] = 'vid';
+$handler->display->display_options['filters']['vid']['value'] = array(
+  3 => '3',
+);
+
+/* Display: Other Works by this Author */
+$handler = $view->new_display('block', 'Other Works by this Author', 'block_other_works');
+$handler->display->display_options['defaults']['title'] = FALSE;
+$handler->display->display_options['title'] = 'Other Works by this Author';
+$handler->display->display_options['defaults']['pager'] = FALSE;
+$handler->display->display_options['pager']['type'] = 'mini';
+$handler->display->display_options['pager']['options']['items_per_page'] = '6';
+$handler->display->display_options['pager']['options']['offset'] = '0';
+$handler->display->display_options['pager']['options']['id'] = '0';
+$handler->display->display_options['pager']['options']['expose']['items_per_page_options_all'] = 0;
+$handler->display->display_options['defaults']['empty'] = FALSE;
+/* Empty text: Global: Text area */
+$handler->display->display_options['empty']['area']['id'] = 'area';
+$handler->display->display_options['empty']['area']['table'] = 'views';
+$handler->display->display_options['empty']['area']['field'] = 'area';
+$handler->display->display_options['empty']['area']['empty'] = FALSE;
+$handler->display->display_options['empty']['area']['content'] = '<em>This user has not submitted any other art.</em>';
+$handler->display->display_options['defaults']['relationships'] = FALSE;
+/* Relationship: Node: Author */
+$handler->display->display_options['relationships']['uid']['id'] = 'uid';
+$handler->display->display_options['relationships']['uid']['table'] = 'node';
+$handler->display->display_options['relationships']['uid']['field'] = 'uid';
+$handler->display->display_options['defaults']['arguments'] = FALSE;
+/* Argument: Node: Nid */
+$handler->display->display_options['arguments']['nid']['id'] = 'nid';
+$handler->display->display_options['arguments']['nid']['table'] = 'node';
+$handler->display->display_options['arguments']['nid']['field'] = 'nid';
+$handler->display->display_options['arguments']['nid']['default_action'] = 'default';
+$handler->display->display_options['arguments']['nid']['style_plugin'] = 'default_summary';
+$handler->display->display_options['arguments']['nid']['default_argument_type'] = 'node';
+$handler->display->display_options['arguments']['nid']['break_phrase'] = 0;
+$handler->display->display_options['arguments']['nid']['not'] = 1;
+/* Argument: User: Uid */
+$handler->display->display_options['arguments']['uid']['id'] = 'uid';
+$handler->display->display_options['arguments']['uid']['table'] = 'users';
+$handler->display->display_options['arguments']['uid']['field'] = 'uid';
+$handler->display->display_options['arguments']['uid']['default_action'] = 'default';
+$handler->display->display_options['arguments']['uid']['style_plugin'] = 'default_summary';
+$handler->display->display_options['arguments']['uid']['default_argument_type'] = 'user';
+$handler->display->display_options['arguments']['uid']['default_argument_options']['user'] = TRUE;
+$handler->display->display_options['arguments']['uid']['break_phrase'] = 0;
+$handler->display->display_options['arguments']['uid']['not'] = 0;
+$handler->display->display_options['defaults']['filters'] = FALSE;
+/* Filter: Node: Type */
+$handler->display->display_options['filters']['type']['id'] = 'type';
+$handler->display->display_options['filters']['type']['table'] = 'node';
+$handler->display->display_options['filters']['type']['field'] = 'type';
+$handler->display->display_options['filters']['type']['value'] = array(
+  'art' => 'art',
+);
+/* Filter: Node: Published */
+$handler->display->display_options['filters']['status']['id'] = 'status';
+$handler->display->display_options['filters']['status']['table'] = 'node';
+$handler->display->display_options['filters']['status']['field'] = 'status';
+$handler->display->display_options['filters']['status']['value'] = '1';
+
+/* Display: Submissions by this User */
+$handler = $view->new_display('block', 'Submissions by this User', 'block_1');
+$handler->display->display_options['defaults']['title'] = FALSE;
+$handler->display->display_options['title'] = 'Recent Submissions';
+$handler->display->display_options['defaults']['pager'] = FALSE;
+$handler->display->display_options['pager']['type'] = 'mini';
+$handler->display->display_options['pager']['options']['items_per_page'] = '6';
+$handler->display->display_options['pager']['options']['offset'] = '0';
+$handler->display->display_options['pager']['options']['id'] = '0';
+$handler->display->display_options['pager']['options']['expose']['items_per_page_options_all'] = 0;
+$handler->display->display_options['defaults']['empty'] = FALSE;
+/* Empty text: Global: Text area */
+$handler->display->display_options['empty']['area']['id'] = 'area';
+$handler->display->display_options['empty']['area']['table'] = 'views';
+$handler->display->display_options['empty']['area']['field'] = 'area';
+$handler->display->display_options['empty']['area']['empty'] = FALSE;
+$handler->display->display_options['empty']['area']['content'] = '<em>This user has not submitted any other art.</em>';
+$handler->display->display_options['defaults']['relationships'] = FALSE;
+$handler->display->display_options['defaults']['arguments'] = FALSE;
+/* Argument: User: Uid */
+$handler->display->display_options['arguments']['uid']['id'] = 'uid';
+$handler->display->display_options['arguments']['uid']['table'] = 'users';
+$handler->display->display_options['arguments']['uid']['field'] = 'uid';
+$handler->display->display_options['arguments']['uid']['default_action'] = 'default';
+$handler->display->display_options['arguments']['uid']['style_plugin'] = 'default_summary';
+$handler->display->display_options['arguments']['uid']['default_argument_type'] = 'user';
+$handler->display->display_options['arguments']['uid']['default_argument_options']['user'] = FALSE;
+$handler->display->display_options['arguments']['uid']['break_phrase'] = 0;
+$handler->display->display_options['arguments']['uid']['not'] = 0;
+$handler->display->display_options['defaults']['filters'] = FALSE;
+/* Filter: Node: Type */
+$handler->display->display_options['filters']['type']['id'] = 'type';
+$handler->display->display_options['filters']['type']['table'] = 'node';
+$handler->display->display_options['filters']['type']['field'] = 'type';
+$handler->display->display_options['filters']['type']['value'] = array(
+  'art' => 'art',
+);
+/* Filter: Node: Published */
+$handler->display->display_options['filters']['status']['id'] = 'status';
+$handler->display->display_options['filters']['status']['table'] = 'node';
+$handler->display->display_options['filters']['status']['field'] = 'status';
+$handler->display->display_options['filters']['status']['value'] = '1';
+
+/* Display: Art Search */
+$handler = $view->new_display('page', 'Art Search', 'page_art_search');
+$handler->display->display_options['defaults']['title'] = FALSE;
+$handler->display->display_options['title'] = 'Search Results';
+$handler->display->display_options['defaults']['pager'] = FALSE;
+$handler->display->display_options['pager']['type'] = 'full';
+$handler->display->display_options['pager']['options']['items_per_page'] = '18';
+$handler->display->display_options['pager']['options']['offset'] = '0';
+$handler->display->display_options['pager']['options']['id'] = '0';
+$handler->display->display_options['pager']['options']['expose']['items_per_page_options'] = '9,18,36,72';
+$handler->display->display_options['pager']['options']['expose']['items_per_page_options_all'] = 0;
+$handler->display->display_options['defaults']['exposed_block'] = FALSE;
+$handler->display->display_options['exposed_block'] = TRUE;
+$handler->display->display_options['defaults']['filters'] = FALSE;
+/* Filter: Node: Type */
+$handler->display->display_options['filters']['type']['id'] = 'type';
+$handler->display->display_options['filters']['type']['table'] = 'node';
+$handler->display->display_options['filters']['type']['field'] = 'type';
+$handler->display->display_options['filters']['type']['value'] = array(
+  'art' => 'art',
+);
+/* Filter: Node: Published */
+$handler->display->display_options['filters']['status']['id'] = 'status';
+$handler->display->display_options['filters']['status']['table'] = 'node';
+$handler->display->display_options['filters']['status']['field'] = 'status';
+$handler->display->display_options['filters']['status']['value'] = '1';
+/* Filter: Search: Search Terms */
+$handler->display->display_options['filters']['keys']['id'] = 'keys';
+$handler->display->display_options['filters']['keys']['table'] = 'search_index';
+$handler->display->display_options['filters']['keys']['field'] = 'keys';
+$handler->display->display_options['filters']['keys']['exposed'] = TRUE;
+$handler->display->display_options['filters']['keys']['expose']['operator'] = 'keys_op';
+$handler->display->display_options['filters']['keys']['expose']['identifier'] = 'keys';
+$handler->display->display_options['filters']['keys']['expose']['single'] = TRUE;
+$handler->display->display_options['path'] = 'search/art';
+$translatables['art'] = array(
+  t('Defaults'),
+  t('more'),
+  t('Go'),
+  t('Reset'),
+  t('Sort By'),
+  t('Asc'),
+  t('Desc'),
+  t('Path'),
+  t('[path]'),
+  t('Latest 2D Art'),
+  t('Latest 3D Art'),
+  t('Latest Textures'),
+  t('Latest  Textures'),
+  t('Latest Music'),
+  t('Latest  Music'),
+  t('Latest SFX'),
+  t('Other Works by this Author'),
+  t('Items per page'),
+  t('- All -'),
+  t('Offset'),
+  t('<em>This user has not submitted any other art.</em>'),
+  t('user'),
+  t('All'),
+  t('Submissions by this User'),
+  t('Recent Submissions'),
+  t('Art Search'),
+  t('Search Results'),
+);

@@ -1,0 +1,334 @@
+<?php
+
+function cctag_field_formatter_info() {
+  return array(
+    'license' => array(
+      'label' => 'License',
+      'field types' => array('taxonomy_term_reference'),
+    ),
+  );
+}
+
+function cctag_field_formatter_view($entity_type, $entity, $field, $instance, $langcode, $items, $display) {
+  $element = array();
+
+  switch ($display['type']) {
+    case 'license':
+      foreach($items as $delta => $item) {
+        $term = taxonomy_term_load($item['tid']);
+
+        /*
+        $output = '';
+        $output .= "<div class='license-icon'><a href='{$term->field_license_deed['und'][0]['value']}'>";
+        $output .= "<img src='" . file_create_url($term->field_license_image['und'][0]['uri']);
+        $output .= "' alt='{$term->field_license_image['und'][0]['alt']}' title='{$term->field_license_image['und'][0]['alt']}'><div class='license-name'>{$term->name}</div></a></div>";
+        */
+
+        $output = theme('license_tag', array('term' => $term));
+        $element[$delta] = array('#markup' => $output);
+      }
+      break;
+  }
+
+  return $element;
+}
+
+function cctag_theme($existing, $type, $theme, $path) {
+  return array(
+    'license_tag' => array(
+      'variables' => array('term' => NULL),
+    ),
+  );
+}
+
+function theme_license_tag($variables) {
+  $term = $variables['term'];
+  drupal_add_css(drupal_get_path('module', 'cctag') . '/cctag.css');
+  
+  $output = "<div class='license-icon'><a href='{$term->field_license_deed['und'][0]['value']}' target='_blank'>";
+  $output .= "<img src='" . file_create_url($term->field_license_image['und'][0]['uri']);
+  $output .= "' alt='{$term->field_license_image['und'][0]['alt']}' title='{$term->field_license_image['und'][0]['alt']}'><div class='license-name'>{$term->name}</div></a></div>";
+
+  return $output;
+}
+
+function cctag_token_info_alter(&$data) {
+  $data['tokens']['term']['license-tag'] = array(
+    'name' => t('License Image'),
+    'description' => t('License image linked to deed.'),
+  );
+}
+
+function cctag_tokens($type, $tokens, array $data = array(), array $options = array()) {
+  $replacements = array();
+  
+  if($type == 'term' && !empty($data['term'])) {
+    $term = $data['term'];
+    foreach($tokens as $name => $original) {
+      switch($name) {
+        case 'license-tag':
+          $replacements[$original] = theme('license_tag', array('term' => $term));
+          break;
+      }
+    }
+  }
+
+  return $replacements;
+}
+
+function _cctag_taxonomy() {
+  return array(
+    'licenses' => array(
+      'name' => 'Licenses',
+      'machine_name' => 'licenses',
+      'description' => '',
+      'hierarchy' => '0',
+      'module' => 'taxonomy',
+      'weight' => '0',
+      'rdf_mapping' => array(
+        'rdftype' => array(
+          0 => 'skos:ConceptScheme',
+        ),
+        'name' => array(
+          'predicates' => array(
+            0 => 'dc:title',
+          ),
+        ),
+        'description' => array(
+          'predicates' => array(
+            0 => 'rdfs:comment',
+          ),
+        ),
+      ),
+    ),
+  );
+}
+
+function _cctag_fields() {
+  $fields = array();
+
+  // Exported field: 'taxonomy_term-licenses-field_license_deed'
+  $fields['taxonomy_term-licenses-field_license_deed'] = array(
+    'field_config' => array(
+      'active' => '1',
+      'cardinality' => '1',
+      'deleted' => '0',
+      'entity_types' => array(),
+      'field_name' => 'field_license_deed',
+      'foreign keys' => array(
+        'format' => array(
+          'columns' => array(
+            'format' => 'format',
+          ),
+          'table' => 'filter_format',
+        ),
+      ),
+      'indexes' => array(
+        'format' => array(
+          0 => 'format',
+        ),
+      ),
+      'module' => 'text',
+      'settings' => array(
+        'max_length' => '255',
+      ),
+      'translatable' => '1',
+      'type' => 'text',
+    ),
+    'field_instance' => array(
+      'bundle' => 'licenses',
+      'default_value' => NULL,
+      'deleted' => '0',
+      'description' => '',
+      'display' => array(
+        'default' => array(
+          'label' => 'above',
+          'settings' => array(),
+          'type' => 'hidden',
+          'weight' => '1',
+        ),
+      ),
+      'entity_type' => 'taxonomy_term',
+      'field_name' => 'field_license_deed',
+      'label' => 'CC Deed',
+      'required' => 0,
+      'settings' => array(
+        'text_processing' => '0',
+        'user_register_form' => FALSE,
+      ),
+      'widget' => array(
+        'active' => 1,
+        'module' => 'text',
+        'settings' => array(
+          'size' => '60',
+        ),
+        'type' => 'text_textfield',
+        'weight' => '1',
+      ),
+    ),
+  );
+
+  // Exported field: 'taxonomy_term-licenses-field_license_image'
+  $fields['taxonomy_term-licenses-field_license_image'] = array(
+    'field_config' => array(
+      'active' => '1',
+      'cardinality' => '1',
+      'deleted' => '0',
+      'entity_types' => array(),
+      'field_name' => 'field_license_image',
+      'foreign keys' => array(
+        'fid' => array(
+          'columns' => array(
+            'fid' => 'fid',
+          ),
+          'table' => 'file_managed',
+        ),
+      ),
+      'indexes' => array(
+        'fid' => array(
+          0 => 'fid',
+        ),
+      ),
+      'module' => 'image',
+      'settings' => array(
+        'default_image' => 0,
+        'uri_scheme' => 'public',
+      ),
+      'translatable' => '1',
+      'type' => 'image',
+    ),
+    'field_instance' => array(
+      'bundle' => 'licenses',
+      'deleted' => '0',
+      'description' => '',
+      'display' => array(
+        'default' => array(
+          'label' => 'hidden',
+          'module' => 'image',
+          'settings' => array(
+            'image_link' => '',
+            'image_style' => '',
+          ),
+          'type' => 'image',
+          'weight' => '0',
+        ),
+      ),
+      'entity_type' => 'taxonomy_term',
+      'field_name' => 'field_license_image',
+      'label' => 'License Image',
+      'required' => 0,
+      'settings' => array(
+        'alt_field' => 1,
+        'file_directory' => 'license_images',
+        'file_extensions' => 'png gif jpg jpeg',
+        'max_filesize' => '',
+        'max_resolution' => '',
+        'min_resolution' => '',
+        'title_field' => 1,
+        'user_register_form' => FALSE,
+      ),
+      'widget' => array(
+        'active' => 1,
+        'module' => 'image',
+        'settings' => array(
+          'preview_image_style' => 'thumbnail',
+          'progress_indicator' => 'throbber',
+        ),
+        'type' => 'image_image',
+        'weight' => '2',
+      ),
+    ),
+  );
+
+  // Translatables
+  // Included for use with string extractors like potx.
+  t('CC Deed');
+  t('License Image');
+
+  return $fields;
+}
+
+function _cctag_terms() {
+  $terms = array();
+
+  $terms[] = array(
+    'name' => 'CC-BY 3.0',
+    'deed' => 'http://creativecommons.org/licenses/by/3.0/',
+    'image' => 'cc-by.png',
+  );
+  
+  $terms[] = array(
+    'name' => 'CC-BY-SA 3.0',
+    'deed' => 'http://creativecommons.org/licenses/by-sa/3.0/',
+    'image' => 'cc-by-sa.png',
+  );
+  
+  $terms[] = array(
+    'name' => 'CC0',
+    'deed' => 'http://creativecommons.org/publicdomain/zero/1.0/',
+    'image' => 'cc0.png',
+  );
+  
+  $terms[] = array(
+    'name' => 'GPL 2.0',
+    'deed' => 'http://www.gnu.org/licenses/old-licenses/gpl-2.0.html',
+    'image' => 'gpl.png',
+  );
+  
+  $terms[] = array(
+    'name' => 'GPL 3.0',
+    'deed' => 'http://www.gnu.org/licenses/gpl-3.0.html',
+    'image' => 'gpl.png',
+  );
+  
+  $terms[] = array(
+    'name' => 'LGPL 2.1',
+    'deed' => 'http://www.gnu.org/licenses/lgpl-2.1.html',
+    'image' => 'lgpl.png',
+  );
+  
+  $terms[] = array(
+    'name' => 'LGPL 3.0',
+    'deed' => 'http://www.gnu.org/licenses/lgpl-3.0.html',
+    'image' => 'lgpl.png',
+  );
+  
+  return $terms;
+}
+
+function _cctag_add_terms() {
+  $terms = _cctag_terms();
+  $vocabs = taxonomy_vocabulary_get_names();
+  $fids = array();
+
+  $destination = file_default_scheme() . '://license_images';
+  file_prepare_directory($destination, FILE_CREATE_DIRECTORY);
+  
+  foreach($terms as $t) {
+    $term = new stdClass;
+    $term->name = $t['name'];
+    #$term->vocabulary_machine_name = 'licenses';
+    $term->vid = $vocabs['licenses']->vid;
+    $term->field_license_deed['und'][0]['value'] = $t['deed'];
+
+    if(!array_key_exists($t['image'], $fids)) {
+      $path = drupal_get_path('module', 'cctag') . '/images/' . $t['image'];
+      $newfile = file_unmanaged_copy($path, $destination);
+      $newuri = $destination . "/" . basename($newfile);
+      $file = new stdClass;
+      $file->fid = NULL;
+      $file->uri = $newuri;
+      $file->filename = basename($newfile);
+      $file->filemime = file_get_mimetype($file->uri);
+      $file->uid      = 1;
+      $file->status   = FILE_STATUS_PERMANENT;
+      $image = file_save($file);
+      $fids[$t['image']] = $image->fid;
+    }
+    $term->field_license_image['und'][0]['fid'] = $fids[$t['image']];
+    
+    //print_r($term);
+    print("Saving license {$term->name}\n");
+    taxonomy_term_save($term);
+  }
+}

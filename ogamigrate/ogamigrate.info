@@ -1,0 +1,7 @@
+name = OGA Migrate
+description = OGA 1.x -> 2.0 migration tool
+core = 7.x
+package = OGA
+
+files[] = ogamigrate.module
+dependencies[] = oga

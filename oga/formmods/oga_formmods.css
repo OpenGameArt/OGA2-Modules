@@ -1,0 +1,11 @@
+.red {
+    font-size: 150%;
+    text-shadow: rgba(255, 255, 255, 0.5) 0 0 5px;
+}
+
+#commasep {
+    transition: all .5s;
+    -moz-transition: all .5s;
+    -webkit-transition: all .5s;
+    -o-transition: all .5s;
+}

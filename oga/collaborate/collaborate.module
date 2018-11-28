@@ -1,0 +1,13 @@
+<?php
+
+function collaborate_node_access($node, $op, $account) {
+  if(($op == 'update' || $op == 'view') && isset($node->field_collaborators) && is_array($node->field_collaborators)) {
+    $collab = field_get_items('node', $node, 'field_collaborators');
+    if(is_array($collab)) {
+      foreach($collab as $c) {
+        if($c['uid'] == $account->uid) return NODE_ACCESS_ALLOW;
+      }
+    }
+  }
+  return NODE_ACCESS_IGNORE;
+}

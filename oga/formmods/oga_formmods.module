@@ -1,0 +1,253 @@
+<?php
+
+function oga_formmods_perimission() {
+  return array(
+    'publish new art automatically' => array(
+      'title' => t('Publish new art automatically'),
+      'description' => t('Allow user to skip the art moderation process.'),
+    ),
+  );
+}
+
+/*
+function oga_formmods_node_access($node, $op, $account) {
+  if($op == 'edit') {
+    if($node->type == 'art_challenge_entry') {
+      // Prevent users from editing art challenge entries after the challenge ends.
+      return NODE_ACCESS_IGNORE;
+    }
+  }
+  return NODE_ACCESS_IGNORE;
+}
+*/
+
+function oga_formmods_form_forum_node_form_alter(&$form, &$form_state, $form_id) {
+  unset($form['field_forum_attachments']);
+}
+
+function oga_formmods_form_comment_form_alter(&$form, &$form_state, $form_id) {
+  if($form['#node']->type == 'forum') {
+    unset($form['field_forum_attachments']);
+  }
+}
+
+function oga_formmods_form_art_node_form_alter(&$form, &$form_state, $form_id) {
+  global $user;
+  //dsm($form);
+  
+  $form['#title'] = 'Submit Art';
+  drupal_set_title('Submit Art');
+  
+  if($user->uid == 1) {
+    //dsm($form);
+  }
+  
+  if(!user_is_logged_in()) {
+    drupal_goto('content/you-must-be-logged-in-to-submit-art');
+  }
+  
+  $form['heading'] = array(
+    '#markup' => "<h2>Submit Art</h2>",
+    '#weight' => -100,
+  );
+
+  $form['field_collaborators']['und']['add_more']['#value'] = t('Add another collaborator');
+
+  // Hide the old attribution instructions field if it's empty.
+  //$attrib = $form_state['values']['field_art_attribution'];
+  if(!isset($form['field_art_attribution']['und'][0]['value']['#default_value'])) {
+    $form['field_art_attribution']['#attributes'] = array('style' => 'display:none;');
+  }
+
+  $form['submission_guidelines'] = array(
+    '#markup' => "Please read our <b><a href='/content/art-submission-guidelines' target='_BLANK'>submission guidelines</a></b>.",
+    '#weight' => $form['field_art_type']['#weight'],
+  );
+  $form['#group_children']['submission_guidelines'] = 'group_left_column';
+
+  if($user->uid > 0) {
+    $form['your_own_work'] = array(
+      '#type' => 'radios',
+      '#title' => 'Is this your own work? <span class="form-required" title="This field is required.">*</span>',
+      '#options' => array('Yes' => 'Yes', 'No' => 'No'),
+      '#weight' => $form['#groups']['group_author_information']->weight - 1,
+      '#required' => FALSE,
+      '#attributes' => array('class' => array('required')),
+    );
+
+    $form['#group_children']['your_own_work'] = 'group_left_column';
+
+    if(isset($form['nid']['#value'])) {
+      if(count($form['#node']->field_art_author) > 0) {
+        $form['your_own_work']['#default_value'] = 'No';
+      }
+      else {
+        $form['your_own_work']['#default_value'] = 'Yes';
+        $form['#groups']['group_author_information']->format_settings['instance_settings']['classes'] = 'hidden';
+      }
+    } else {
+      $form['#groups']['group_author_information']->format_settings['instance_settings']['classes'] = 'hidden';
+    }
+  } 
+  
+  $form['#validate'][] = 'oga_formmods_art_form_validate';
+  
+  if(!$form['nid']['#value']) {
+      unset($form['revision_information']);
+  } else {
+      $form['revision_information']['#group'] = 'group_right_column';
+      $form['#group_children']['revision_information'] = 'group_right_column';
+      $form['revision_information']['#weight'] = $form['field_art_files']['#weight'] + 1;
+  }
+  
+  unset($form['field_oga1_nid']);
+  unset($form['field_related_art']);
+  unset($form['group_audience']);
+  #unset($form['metatags']);
+  unset($form['field_art_rating']);
+  unset($form['actions']['preview']);
+  
+  if($user->uid != 1) {
+    $form['field_art_last_updated']['#type'] = 'hidden';
+    //dsm($form);
+  }
+  
+  $form['#attached']['css'] = array(
+    drupal_get_path('module', 'oga_formmods') . '/oga_formmods.css',
+  );
+  $form['#attached']['js'] = array(
+    drupal_get_path('module', 'oga_formmods') . '/oga_formmods_submit_art.js',
+  );
+  
+  //dsm($form);
+}
+
+function oga_formmods_form_art_collection_node_form_alter(&$form, &$form_state, $form_id) {
+  $form['field_collaborators']['und']['add_more']['#value'] = t('Add another collaborator');
+  unset($form['field_collection_auto_generated']);
+}
+
+function oga_formmods_form_user_register_form_alter(&$form, &$form_state, $form_id) {
+  unset($form['field_medals']);
+}
+
+function oga_formmods_form_alter(&$form, &$form_state, $form_id) {
+  if($form_id == 'user_login_block') {
+    $form['openid_identifier']['#title'] = 'OpenID';    
+  }
+
+  if(preg_match('/^views_form_browse_textures/', $form_id)) {
+    if(isset($form['bundle_texture'])) {
+      $form['bundle_texture']['field_art_licenses']['und']['#required'] = FALSE;
+      $form['bundle_texture']['field_art_files']['und'][0]['#required'] = FALSE;
+    }
+  }
+}
+
+function oga_formmods_art_form_validate($form, &$form_state) {
+    global $user;
+
+    if($user->uid > 0 && $form_state['values']['your_own_work'] == '') {
+        form_set_error('your_own_work', "Is this your own work? field is required");
+    }
+    
+    if(($user->uid == 0 || $form_state['values']['your_own_work'] == 'No') && $form_state['values']['field_art_author']['und'][0]['value'] == '') {
+        form_set_error('field_art_author', "You must specify an author.");
+    }
+    
+    if(!isset($form_state['values']['field_art_type']['und'][0]['tid']) || $form_state['values']['field_art_type']['und'][0]['tid'] == '') {
+        form_set_error('field_art_type', "Art Type field is required");
+    }
+    
+    /*
+    if(isset($form_state['values']['field_art_tags']['und'][0]['name'])) {
+      $form_state['values']['field_art_tags']['und'][0]['name'] = str_replace(array('#', ' '), array('', ', '),  $form_state['values']['field_art_tags']['und'][0]['name']);    
+    } 
+    */    
+    
+    $previews = $form_state['values']['field_art_preview']['und'];
+    if(!is_array($previews) || count($previews) == 0 || $form_state['values']['field_art_preview']['und'][0]['fid'] == 0) {
+        $art = null;
+        if($form_state['values']['field_art_files']['und'][0]['fid'] != 0) {
+            $art = file_load($form_state['values']['field_art_files']['und'][0]['fid']);
+            $mime = explode("/", $art->filemime);
+            
+            if($mime[0] != 'image' && $mime[0] != 'audio' && $art->filemime != 'application/ogg') {
+                form_set_error('field_art_preview', "A preview could not be generated automatically for the type of file you uploaded.  Please upload one.");
+            }
+        }        
+    }
+}
+
+function oga_formmods_form_lpc_art_judging_form_node_form_alter(&$form, &$form_state, $form_id) {
+  global $user;
+
+  $result = db_query("select field_art_submission_nid as nid from field_data_field_art_submission e, node n where entity_id = n.nid and n.uid = :uid", array(':uid' => $user->uid));
+
+  foreach($result as $row) {
+    unset($form['field_art_submission']['und']['#options'][$row->nid]);
+  }
+
+  if(isset($_GET['entry'])) {
+    $entry = $_GET['entry'];
+    if($form['field_art_submission']['und']['#options'][$entry]) {
+      $form['field_art_submission']['und']['#default_value'] = $entry;
+    }
+  }
+}
+
+function oga_formmods_form_lpc_code_judging_form_node_form_alter(&$form, &$form_state, $form_id) {
+  global $user;
+
+  $result = db_query("select field_lpc_code_entry_nid as nid from field_data_field_lpc_code_entry e, node n where entity_id = n.nid and n.uid = :uid", array(':uid' => $user->uid));
+  
+  foreach($result as $row) {
+    unset($form['field_lpc_code_entry']['und']['#options'][$row->nid]);
+  }
+
+  if(isset($_GET['entry'])) {
+    $entry = $_GET['entry'];
+    if($form['field_lpc_code_entry']['und']['#options'][$entry]) {
+      $form['field_lpc_code_entry']['und']['#default_value'] = $entry;
+    }
+  }  
+}
+
+/*
+function oga_formmods_form_art_challenge_entry_node_form_alter(&$form, &$form_state, $form_id) {
+  global $user;
+ 
+  $nid = NULL;
+  $form['field_art_challenge']['#type'] = 'hidden';
+  
+  if(isset($form_state['node']->field_art_challenge['und'][0]['nid'])) {
+    $nid = $form_state['node']->field_art_challenge['und'][0]['nid'];
+  }
+  
+  if(!$nid) {
+    $nid = arg(3);
+    $form['field_art_challenge']['und']['#default_value'][0] = $nid;
+  }
+  
+  if($nid && is_numeric($nid)) {    
+    $challenge = node_load($nid);
+    if($challenge && $challenge->type == 'art_challenge' && $challenge->status == 1) {
+      $start = date_create($challenge->field_date_range['und'][0]['value']);
+
+      $result = db_query("select nid, title from node where type = 'art' and created >= :created and status = 1 and uid = :uid order by created", array(':uid' => $user->uid, ':created' => $start->format('U')));
+      
+      $form['field_challenge_art']['und']['#options'] = array();
+      $form['field_challenge_art']['und']['#options']['_none'] = '- Select an art submission -';
+      foreach($result as $r) {
+        $form['field_challenge_art']['und']['#options'][$r->nid] = $r->title;
+      }
+    } else {
+      drupal_set_message("Invalid art challenge.  Please contact an OpenGameArt.org administrator.", 'error'); 
+      drupal_goto(NULL, array(), 303);
+    }
+  } else {
+    drupal_set_message("Invalid art challenge.  Please contact an OpenGameArt.org administrator.", 'error'); 
+    drupal_goto(NULL, array(), 303);
+  }
+}
+*/

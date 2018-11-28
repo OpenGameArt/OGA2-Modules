@@ -1,0 +1,10 @@
+name = CC Tag
+description = A taxonomy-based CC License module
+core = 7.x
+package = Creative Commons
+
+files[] = cctag.module
+files[] = cctag.install
+files[] = cctag.css
+
+dependencies[] = taxonomy

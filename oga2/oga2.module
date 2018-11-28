@@ -1,0 +1,7 @@
+<?php
+/**
+ * @file
+ * Code for the OGA2 feature.
+ */
+
+include_once('oga2.features.inc');

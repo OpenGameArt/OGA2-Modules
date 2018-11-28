@@ -1,0 +1,10 @@
+name = Medals
+description = User Medals
+core = 7.x
+package = Medals
+
+files[] = medals.module
+files[] = medals.install
+files[] = medals.css
+
+dependencies[] = userpoints

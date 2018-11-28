@@ -1,0 +1,18 @@
+<?php
+
+function cctag_install() {
+  $vocabs = _cctag_taxonomy();
+  foreach($vocabs as $vocab) {
+    taxonomy_vocabulary_save((object)$vocab);
+  }
+
+  $fields = _cctag_fields();
+  foreach($fields as $field) {
+    dsm("Creating field...");
+    field_create_field($field['field_config']);
+    field_create_instance($field['field_instance']);
+  }
+
+  _cctag_add_terms();
+}
+

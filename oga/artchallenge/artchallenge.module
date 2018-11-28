@@ -1,0 +1,130 @@
+<?php
+
+function artchallenge_perimission() {
+  return array(
+    'administer art challenge' => array(
+      'title' => t('Administer OGA Art Challenge'),
+      'description' => t('Allow user to administer the OGA art challenge.'),
+    ),
+  );
+}
+
+function artchallenge_node_access($node, $op, $account) {
+  if($op == 'edit') {
+    if($node->type == 'art_challenge_entry') {
+      // Prevent users from editing art challenge entries after the challenge ends.
+      return NODE_ACCESS_IGNORE;
+    }
+  }
+  return NODE_ACCESS_IGNORE;
+}
+
+function artchallenge_form_art_challenge_entry_node_form_alter(&$form, &$form_state, $form_id) {
+  global $user;
+ 
+  $nid = NULL;
+  $form['field_art_challenge']['#type'] = 'hidden';
+  
+  if(isset($form_state['node']->field_art_challenge['und'][0]['nid'])) {
+    $nid = $form_state['node']->field_art_challenge['und'][0]['nid'];
+  }
+  
+  if(!$nid) {
+    $nid = arg(3);
+    $form['field_art_challenge']['und']['#default_value'][0] = $nid;
+  }
+  
+  if($nid && is_numeric($nid)) {    
+    $challenge = node_load($nid);
+    if($challenge && $challenge->type == 'art_challenge' && $challenge->status == 1) {
+      $start = date_create($challenge->field_date_range['und'][0]['value']);
+
+      $result = db_query("select nid, title from node where type = 'art' and created >= :created and status = 1 and uid = :uid order by created", array(':uid' => $user->uid, ':created' => $start->format('U')));
+      
+      $form['field_challenge_art']['und']['#options'] = array();
+      $form['field_challenge_art']['und']['#options']['_none'] = '- Select an art submission -';
+      foreach($result as $r) {
+        $form['field_challenge_art']['und']['#options'][$r->nid] = $r->title;
+      }
+    } else {
+      drupal_set_message("Invalid art challenge.  Please contact an OpenGameArt.org administrator.", 'error'); 
+      drupal_goto(NULL, array(), 303);
+    }
+  } else {
+    drupal_set_message("Invalid art challenge.  Please contact an OpenGameArt.org administrator.", 'error'); 
+    drupal_goto(NULL, array(), 303);
+  }
+}
+
+function artchallenge_form_art_challenge_node_form_alter(&$form, &$form_state, $form_id) {
+  global $user;
+  
+  /*
+  if($user->uid == 1) {
+    dsm($form);
+  }
+  */
+}
+
+function artchallenge_cron() {
+  $time = time();
+  $date = date(DATE_ATOM, $time);
+  
+  // 1 week (in seconds) before today
+  $end_voting_date = date(DATE_ATOM, $time - 604800);
+  
+  //print("Date: $date\n");
+  
+  // Set challenges that start today to in progress
+  $result = db_query("select n.nid from field_data_field_date_range d, node n, field_data_field_challenge_status s where s.entity_id = n.nid and d.entity_id = n.nid and s.field_challenge_status_value = 'new' and d.field_date_range_value <= :start_date", array(':start_date' => $date));
+  
+  foreach($result as $r) {
+    $node = node_load($r->nid);
+    $node->field_challenge_status['und'][0]['value'] = 'in_progress';
+    //print("Challenge {$r->nid} now in progress.\n");
+    node_save($node);
+  }
+  
+  // Set challenges that end today to voting
+  $result = db_query("select n.nid from field_data_field_date_range d, node n, field_data_field_challenge_status s where s.entity_id = n.nid and d.entity_id = n.nid and s.field_challenge_status_value = 'in_progress' and d.field_date_range_value2 < :end_date", array(':end_date' => $date));
+  
+  foreach($result as $r) {
+    $node = node_load($r->nid);
+    $node->field_challenge_status['und'][0]['value'] = 'voting';
+    //print("Challenge {$r->nid} now voting.\n");
+    node_save($node);
+  }
+  
+  // For each challenge that ends voting today:
+  $result = db_query("select n.nid from field_data_field_date_range d, node n, field_data_field_challenge_status s where s.entity_id = n.nid and d.entity_id = n.nid and s.field_challenge_status_value = 'voting' and d.field_date_range_value2 <= :date", array(':date' => $end_voting_date));
+  
+  $flag = flag_get_flag('challenge_vote');
+  
+  foreach($result as $r) {
+    $node = node_load($r->nid);
+    
+    // Set the status to finished
+    $node->field_challenge_status['und'][0]['value'] = 'finished';
+    //print("Challenge {$r->nid} now finished.\n");
+    
+    // Find the items with the highest vote count and set them as winners
+    // Award those users a challenge medal, if they don't already have one
+    $maxvotes = db_query("select count from flag_counts where fid = :fid and content_id in (select entity_id from field_data_field_art_challenge where field_art_challenge_nid = :nid)", array(':fid' => $flag->fid, ':nid' => $node->nid))->fetchField();
+    $entries = db_query("select entity_id from field_data_field_art_challenge where field_art_challenge_nid = :nid", array(':nid' => $node->nid));
+    
+    foreach($entries as $e) {
+      $entry_node = node_load($e->entity_id);
+      $account = user_load($entry_node->uid);
+      //print("  {$entry_node->uid} got " . $flag->get_count($entry_node->nid) . " votes\n");
+      if($flag->get_count($entry_node->nid) == $maxvotes) {
+        //print("  {$account->uid} won\n");
+        $node->field_challenge_winners['und'][]['nid'] = $entry_node->nid;        
+        medals_award($account, 'Contest Winner');
+      }
+      medals_award($account, 'Contest Participant');
+      user_save($account);
+    }
+    
+    node_save($node);
+  }
+}

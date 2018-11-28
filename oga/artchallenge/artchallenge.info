@@ -1,0 +1,6 @@
+name = OGA Art Challenge
+description = Customizations to make the art challenge work.
+core = 7.x
+package = OGA
+
+files[] = artchallenge.module

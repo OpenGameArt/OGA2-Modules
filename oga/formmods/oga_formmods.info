@@ -1,0 +1,11 @@
+name = OGA Form Mods
+description = OGA form customizations
+core = 7.x
+package = OGA
+
+files[] = oga_formmods.module
+files[] = oga_formmods.css
+dependencies[] = oga
+dependencies[] = openid
+
+ 

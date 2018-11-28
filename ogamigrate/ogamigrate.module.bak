@@ -1,0 +1,853 @@
+<?php
+
+/*
+ * Migration steps:
+ *
+ * 1. Set up new Drupal instance with clear database
+ * 2. Clear sites/default/files
+ * 3. Enable OGA2 feature
+ * 4. Enable ogamigrate module
+ * 5. Copy the OGA2 theme
+ * 6. Run migrate batch
+ * 7. Enable themekey settings
+ */
+
+function ogamigrate_permission() {
+  return array(
+    'migrate to oga2' => array(
+      'title' => t('OGA 1.x -> OGA 2.0 Data Migration'), 
+      'description' => t('Migrate data from the old site.'),
+    ),
+  );
+}
+
+function ogamigrate_menu() {
+  $items['admin/ogamigrate'] = array(
+    'page callback' => '_ogamigrate_batch',
+    'access arguments' => array('migrate to oga2'),
+  );
+  
+  $items['admin/ogamigrate/finished'] = array(
+    'page callback' => '_ogamigrate_complete',
+    'access arguments' => array('migrate to oga2'),
+  );
+  return $items;
+}
+
+function _ogamigrate_batch() {
+  $batch = array(
+    'title' => t('Migrating data from OGA 1'),
+    'operations' => array(
+      array('_ogamigrate_static_vocabs', array()),
+      array('_ogamigrate_users', array()),
+      array('_ogamigrate_setup_tags', array()),
+      array('_ogamigrate_forum_tags', array()),
+      array('_ogamigrate_forum_parents', array()),
+      array('_ogamigrate_tags', array()),
+      array('_ogamigrate_nodes', array()),
+      array('_ogamigrate_clean_tags', array()),
+      array('_ogamigrate_favorites', array()),
+    ),
+    'finished' => '_ogamigrate_finished',
+  );
+  batch_set($batch);
+  batch_process('admin/ogamigrate/finished');
+}
+
+function _ogamigrate_setup_tags(&$context) {
+  $vocabs = taxonomy_vocabulary_get_names();
+  if(!$vocabs['art_tags']) {
+    $tags = new stdClass;
+    $tags->machine_name = 'art_tags';
+    $tags->name = 'Art Tags';
+    taxonomy_vocabulary_save($tags);
+  }
+}
+
+function _ogamigrate_static_vocabs(&$context) {
+  global $licenses;
+  foreach(unserialize(_ogamigrate_get_license_list()) as $l) {
+    taxonomy_term_save($l);
+  }
+  $context['finished'] = 1;
+}
+
+function _ogamigrate_tags(&$context) {
+  if (empty($context['sandbox'])) {
+    db_set_active('default');
+    $vocabs = taxonomy_vocabulary_get_names();
+    #error_log(print_r($vocabs, true));
+    $context['sandbox']['vid'] = $vocabs['art_tags']->vid;
+    $context['sandbox']['progress'] = 0;
+    $context['sandbox']['current_tid'] = 0;
+    db_set_active('old');
+    $context['sandbox']['max'] = db_query('select max(tid) from {term_data} where vid in (3, 4, 6, 7, 10);')->fetchField();
+  }
+    
+  db_set_active('old');
+  
+  #error_log("migrating tid {$context['sandbox']['current_tid']} ({$context['finished']}");
+  #error_log("vid: " . $context['sandbox']['tags_vid']);
+  
+  $limit = 5;
+  
+  $result = db_select('term_data')
+  ->fields('term_data', array('tid', 'name', 'description'))
+  ->condition('tid', $context['sandbox']['current_tid'], '>')
+  ->condition('vid', array(3, 4, 6, 7, 10), 'in')
+  ->orderBy('tid')
+  ->range(0, $limit)
+  ->execute();
+  
+  db_set_active('default');
+  
+  foreach ($result as $row) {
+    #error_log("Processing tid {$row->tid} / {$context['sandbox']['max']} ({$row->name}) vid: {$context['sandbox']['vid']}");
+    $context['results'][] = $row->tid . ' : ' . $row->name;
+    $context['sandbox']['current_tid'] = $row->tid;
+    $context['message'] = "Processing tid {$row->tid} / {$context['sandbox']['max']} ({$row->name})";
+    
+    # Check and see if a term by this name already exists in the art_tags vocabulary.
+    # If not, go ahead and create it.
+   
+    $exists = false;
+   $terms = taxonomy_get_term_by_name($row->name);
+    foreach($terms as $t) {
+      if($t->vocabulary_machine_name == 'art_tags')
+        $exists = true;
+    }
+    
+    if(!$exists) {
+      $term = new stdClass;
+      $term->vid = $context['sandbox']['vid'];
+      $term->name = $row->name;
+      $term->description = $row->description;
+      taxonomy_term_save($term);
+    }
+  }
+  
+  #if ($context['sandbox']['progress'] != $context['sandbox']['max']) {
+  $context['finished'] = $context['sandbox']['current_tid'] / $context['sandbox']['max'];
+    
+  #}
+    #error_log("Finished: {$context['finished']} ({$context['sandbox']['progress']} / {$context['sandbox']['max']})");
+}
+
+function _ogamigrate_forum_tags(&$context) {
+  error_log("Migrating forums");
+  if (empty($context['sandbox'])) {
+    db_set_active('default');
+    $vocabs = taxonomy_vocabulary_get_names();
+    #error_log(print_r($vocabs, true));
+    $context['sandbox']['vid'] = $vocabs['forums']->vid;
+    $context['sandbox']['progress'] = 0;
+    $context['sandbox']['current_tid'] = 0;
+    db_set_active('old');
+    $context['sandbox']['max'] = db_query('select max(tid) from {term_data} where vid = 2')->fetchField();
+  }
+    
+  db_set_active('old');
+  
+  #error_log("migrating tid {$context['sandbox']['current_tid']} ({$context['finished']}");
+  #error_log("vid: " . $context['sandbox']['tags_vid']);
+  
+  $limit = 5;
+  
+  $result = db_select('term_data')
+  ->fields('term_data', array('tid', 'name', 'description'))
+  ->condition('tid', $context['sandbox']['current_tid'], '>')
+  ->condition('vid', 2, '=')
+  ->orderBy('tid')
+  ->range(0, $limit)
+  ->execute();
+  
+  db_set_active('default');
+  
+  foreach ($result as $row) {
+    error_log("Processing tid {$row->tid} / {$context['sandbox']['max']} ({$row->name}) vid: {$context['sandbox']['vid']}");
+    $context['results'][] = $row->tid . ' : ' . $row->name;
+    $context['sandbox']['current_tid'] = $row->tid;
+    $context['message'] = "Processing tid {$row->tid} / {$context['sandbox']['max']} ({$row->name})";
+    
+    # Check and see if a term by this name already exists in the art_tags vocabulary.
+    # If not, go ahead and create it.
+   
+    $exists = false;
+    $terms = taxonomy_get_term_by_name($row->name);
+    foreach($terms as $t) {
+      if($t->vocabulary_machine_name == 'forums')
+        $exists = true;
+    }
+    
+    if(!$exists) {
+      #db_set_active('old');
+      #$parent = db_query('select parent from {term_hierarchy} where tid = :tid', array(':tid' => $row->tid))->fetchField();
+      
+      db_set_active('default');
+      $term = new stdClass;
+      $term->vid = $context['sandbox']['vid'];
+      $term->name = $row->name;
+      $term->description = $row->description;
+      #error_log("parent: $parent");
+      #if($parent) 
+        #$term->parent = $parent;
+      taxonomy_term_save($term);
+    }
+  }
+  
+  #if ($context['sandbox']['progress'] != $context['sandbox']['max']) {
+  $context['finished'] = $context['sandbox']['current_tid'] / $context['sandbox']['max'];
+    
+  #}
+    #error_log("Finished: {$context['finished']} ({$context['sandbox']['progress']} / {$context['sandbox']['max']})");
+}
+
+function _ogamigrate_forum_parents() {
+  db_set_active('default');
+  $vocabs = taxonomy_vocabulary_get_names();
+  $vocabs['forums']->vid;
+  $forums = _ogamigrate_load_vocabulary($vocabs['forums']->vid);
+    
+  db_set_active('old');
+  $old = _ogamigrate_load_old_vocabulary(2);
+  $oldforums = array();
+  foreach($old as $tid => $name) {
+    $oldforums[$name] = $tid;
+    #error_log("Old forum $name -> $tid");
+  }
+  
+  $containers = db_query("select value from {variable} where name = 'forum_containers'")->fetchField();
+  error_log("CONTAINERS: $containers" . print_r(unserialize($containers), true));
+  
+  $containers = unserialize($containers);
+  
+  foreach($forums as $name => $tid) {
+    db_set_active('old');
+    $parent = db_query("select parent from {term_hierarchy} where tid = :tid", array(":tid" => $oldforums[$name]))->fetchField();
+    $p = $old[$parent];
+    $newparent = $forums[$p];
+    db_set_active('default');
+    $term = taxonomy_term_load($tid);
+    $term->parent = $newparent;
+    
+    error_log("Parent for {$term->name}: $parent -> $p -> $newparent");
+    taxonomy_term_save($term);
+  }
+  
+  $newcontainers = array();
+  
+  foreach($containers as $c) {
+    $p = $old[$c];
+    $newparent = $forums[$p];
+    error_log("Container: $c -> $p -> $newparent");
+    array_push($newcontainers, $newparent);
+  }
+  
+  variable_set('forum_containers', $newcontainers);
+}
+
+function _ogamigrate_users(&$context) {
+  if (empty($context['sandbox'])) {
+    error_log("SANDBOX EMPTY");
+    db_set_active('default');
+    $context['sandbox']['progress'] = 0;
+    $context['sandbox']['current_uid'] = 0;
+    db_set_active('old');
+    $context['sandbox']['max'] = db_query('select max(uid) from {users};')->fetchField();
+  }
+  
+  db_set_active('old');
+  
+  #error_log("migrating uid {$context['sandbox']['current_uid']} ({$context['finished']}");
+  #error_log("vid: " . $context['sandbox']['tags_vid']);
+  
+  $limit = 5;
+  
+  $result = db_select('users')
+  ->fields('users', array('uid', 'name', 'pass', 'mail', 'created', 'access', 'login', 'status', 'timezone', 'timezone_name'))
+  ->condition('uid', $context['sandbox']['current_uid'], '>')
+  ->orderBy('uid')
+  ->range(0, $limit)
+  ->execute();
+  
+  db_set_active('default');
+  
+  foreach ($result as $row) {
+    #error_log("Processing tid {$row->tid} / {$context['sandbox']['max']} ({$row->name}) vid: {$context['sandbox']['vid']}");
+    $context['results'][] = $row->uid . ' : ' . $row->name;
+    $context['sandbox']['current_uid'] = $row->uid;
+    $context['message'] = "Processing uid {$row->uid} / {$context['sandbox']['max']} ({$row->name})";
+    #error_log($context['message']);
+    
+    # Check and see if a term by this name already exists in the art_tags vocabulary.
+    # If not, go ahead and create it.
+    
+    $exists = false;
+    if(!user_load_by_name($row->name)) {    
+      $edit = array(
+        'name' => $row->name,
+        'pass' => $row->pass,
+        'mail' => $row->mail,
+        'status' => $row->status,
+        'timezone' => $row->timezone_name,
+        'created' => $row->created,
+        'access' => $row->access,
+        'login' => $row->login,
+        'field_oga1_uid' => array('und' => array(array('value' => $row->uid))),
+      );
+      //error_log("old id: " . print_r($edit['field_oga1_uid'], true));
+      $account = user_save(NULL, $edit);
+      #user_save($account, array('field_oga1_uid' => array('und' => array($row->uid))));
+      
+      $new_hash = user_hash_password($row->pass);
+      #error_log("New password hash: $new_hash");
+      if ($new_hash) {
+        $new_hash  = 'U' . $new_hash;
+        db_update('users')
+        ->fields(array('pass' => $new_hash))
+        ->condition('uid', $account->uid)
+        ->execute();
+      }
+    }
+  }
+  
+  #if ($context['sandbox']['progress'] != $context['sandbox']['max']) {
+  $context['finished'] = $context['sandbox']['current_uid'] / $context['sandbox']['max'];
+}
+
+function _ogamigrate_nodes(&$context) {
+  variable_set('comment_maintain_node_statistics', FALSE);
+  $oldpath = "/var/www/sites/opengameart";
+  if (empty($context['sandbox'])) {
+    error_log("ogamigrate_nodes");
+    db_set_active('default');
+    $vocabs = taxonomy_vocabulary_get_names();
+    #error_log(print_r($vocabs, true));
+    $context['sandbox']['vid'] = $vocabs['art_tags']->vid;
+    $context['sandbox']['progress'] = 0;
+    $context['sandbox']['current_nid'] = 0;
+    $context['sandbox']['license_map'] = array(
+      59 => 12,
+      60 => 13,
+      61 => 8, 
+      62 => 9,
+      63 => 10,
+      64 => 11,
+      65 => 14,
+    );
+    $context['sandbox']['user_map'] = _ogamigrate_get_user_map();
+    $context['sandbox']['licenses'] = _ogamigrate_load_vocabulary($vocabs['licenses']->vid);
+    $context['sandbox']['art_types'] = _ogamigrate_load_vocabulary($vocabs['art_types']->vid);
+    $context['sandbox']['forums'] = _ogamigrate_load_vocabulary($vocabs['forums']->vid);
+    error_log(print_r($context['sandbox']['forums'], true));
+    
+    db_set_active('old');
+    $context['sandbox']['oldforums'] = _ogamigrate_load_old_vocabulary(2);
+    $context['sandbox']['max'] = db_query('select max(nid) from {node}')->fetchField();
+    
+    error_log("Processing nodes: {$context['sandbox']['vid']} {$context['sandbox']['max']}");
+  }
+  
+  # Read node info
+  db_set_active('old');
+  
+  $limit = 5;
+  
+  $result = db_select('node')
+  ->fields('node', array('nid'))
+  ->condition('nid', $context['sandbox']['current_nid'], '>')
+  ->condition('type', array('2d_graphic', '3d_art', 'audio', 'forum'), 'in')
+  ->orderBy('nid')
+  ->range(0, $limit)
+  ->execute();
+  
+  # Write node info
+
+  foreach ($result as $row) {
+    //global $user;
+    //$uid = $user->uid;
+    $nid = $row->nid;
+    $nodeinfoquery = db_select('node')
+      ->fields('node', array('nid', 'type', 'title', 'uid', 'status', 'created', 'changed'))
+      ->condition('nid', $nid, '=')
+      ->condition('status', 1, '=')
+      ->execute();
+    
+    foreach($nodeinfoquery as $nodeinfo) {
+      $uid = $context['sandbox']['user_map'][$nodeinfo->uid];
+      db_set_active('old');
+      _ogamigrate_load_node_revision($nodeinfo);
+      _ogamigrate_load_node_fields($nodeinfo, array('license_taxonomy', 'art_tags', 'genre'));
+      #error_log("VID: {$nodeinfo->vid}");
+      #error_log("UID: {$nodeinfo->uid} -> $uid");
+      $node = new stdClass;
+      
+      $node->title = $nodeinfo->title;
+      $node->body = array('und' => array(array('value' => $nodeinfo->body, 'format' => 'filtered_html')));
+      $node->comment = 2;
+      
+      if($nodeinfo->type != 'forum') {
+        $node->type = 'art';
+        $node->field_art_licenses = array('und' => array());
+        $node->field_art_preview = array('und' => array());
+        $node->field_art_files = array('und' => array());        
+        
+        $node->field_art_tags = array();
+        $node->field_art_tags['und'] = array();
+      } else {
+        $node->taxonomy_forums = array('und' => array());  
+        $node->type = 'forum';
+      }
+      
+      $node->created = $nodeinfo->created;
+      $node->changed = $nodeinfo->created;
+      $node->revision_timestamp = $nodeinfo->created;
+      $node->uid = $uid;
+      //$node->last_comment_uid = $uid;
+      
+      //error_log("BODY: " . $node->body);
+      if($nodeinfo->type != 'forum') {
+        foreach($nodeinfo->license_taxonomy as $row) {
+          #error_log("LICENSE: " . print_r($row, true));
+          $tid = $context['sandbox']['license_map'][$row->field_license_taxonomy_value];
+          if($tid) {
+            array_push($node->field_art_licenses['und'], array('tid' => $tid));
+            #error_log("License: $tid");
+          }
+        }
+      }
+      
+      /*
+      foreach($nodeinfo->art_tags as $row) {
+        $old_term = _ogamigrate_get_old_term($row->field_art_tags_value, 10);
+        $tid = _ogamigrate_get_tid($old_term, $context['sandbox']['vid']);
+        if($tid)
+          array_push($node->field_art_tags['und'], array('tid' => $tid));
+        error_log("Tag: {$row->field_art_tags_value} -> $old_term -> $tid");
+      }
+      */
+      if($nodeinfo->type != 'forum') {
+        _ogamigrate_node_add_tags($node, $nodeinfo, $context, 'art_tags', 10);
+        _ogamigrate_node_add_tags($node, $nodeinfo, $context, 'genre', 7);
+      } else {
+        db_set_active('old');
+        $oldforum = db_query('select tid from {forum} where nid = :nid', array(":nid" => $nodeinfo->nid))->fetchField();
+        $oldforum_name = $context['sandbox']['oldforums'][$oldforum];
+        $newforum = $context['sandbox']['forums'][$oldforum_name];
+        array_push($node->taxonomy_forums['und'], array('tid' => $newforum));
+        $node->forum_tid = $newforum;
+        error_log("Forum post: $oldforum -> $oldforum_name -> $newforum: " . $node->title); 
+      }
+      
+      db_set_active('old');
+      
+      if($nodeinfo->type == '2d_graphic') {
+        _ogamigrate_load_node_field($nodeinfo, '2d_type');
+        _ogamigrate_load_file_fields($nodeinfo, array('image', 'preview', 'additional_previews'));       
+
+        $types = _ogamigrate_node_add_tags($node, $nodeinfo, $context, '2d_type', 3);
+        
+        # if it has the texture tag, art type should be 3
+        if(array_key_exists('Texture', $types)) {
+          $node->field_art_type = array('und' => array(0 => array('tid' => 3)));
+        } else {
+          $node->field_art_type = array('und' => array(0 => array('tid' => 2)));
+        }
+        
+        foreach($nodeinfo->image as $row) {
+          $f = _ogamigrate_file_copy("$oldpath/" . $row->filepath, NULL, FILE_EXISTS_RENAME, $uid);
+          if($f->fid)
+            array_push($node->field_art_files['und'], _ogamigrate_file_array($f));
+        }
+        foreach($nodeinfo->preview as $row) {
+          $f = _ogamigrate_file_copy("$oldpath/" . $row->filepath, NULL, FILE_EXISTS_RENAME, $uid);
+          if($f->fid)
+            array_push($node->field_art_preview['und'], _ogamigrate_file_array($f));
+        }
+        foreach($nodeinfo->additional_previews as $row) {
+          $f = _ogamigrate_file_copy("$oldpath/" . $row->filepath, NULL, FILE_EXISTS_RENAME, $uid);
+          if($f->fid)
+            array_push($node->field_art_preview['und'], _ogamigrate_file_array($f));
+        }
+      } elseif($nodeinfo->type == '3d_art') {
+        _ogamigrate_load_node_field($nodeinfo, '3d_type');
+        _ogamigrate_load_file_field($nodeinfo, '3d_model');
+        _ogamigrate_load_local_file_field($nodeinfo, 'required_preview', 'additional_previews');
+        _ogamigrate_node_add_tags($node, $nodeinfo, $context, '3d_type', 6);
+        $model = "3d_model";
+        foreach($nodeinfo->$model as $row) {
+          $f = _ogamigrate_file_copy("$oldpath/" . $row->filepath, NULL, FILE_EXISTS_RENAME, $uid);
+          if($f->fid)
+            array_push($node->field_art_files['und'], _ogamigrate_file_array($f));
+        }
+        foreach($nodeinfo->required_preview as $row) {
+          $f = _ogamigrate_file_copy("$oldpath/" . $row->filepath, NULL, FILE_EXISTS_RENAME, $uid);
+          if($f->fid)
+            array_push($node->field_art_preview['und'], _ogamigrate_file_array($f));
+        }
+        foreach($nodeinfo->additional_previews as $row) {
+          $f = _ogamigrate_file_copy("$oldpath/" . $row->filepath, NULL, FILE_EXISTS_RENAME, $uid);
+          if($f->fid)
+            array_push($node->field_art_preview['und'], _ogamigrate_file_array($f));
+        }        
+        
+        $node->field_art_type = array('und' => array(0 => array('tid' => 4)));
+      } elseif($nodeinfo->type == 'audio') {
+        _ogamigrate_load_node_field($nodeinfo, 'audio_type');
+        _ogamigrate_load_file_field($nodeinfo, 'audio');
+        _ogamigrate_load_local_file_field($nodeinfo, 'audio_preview');
+        $types = _ogamigrate_node_add_tags($node, $nodeinfo, $context, 'audio_type', 4);
+        
+        # if it has the Sound Effects tag, art type should be 6
+        if(array_key_exists('Sound Effects', $types)) {
+          $node->field_art_type = array('und' => array(0 => array('tid' => 6)));
+        } else {
+          $node->field_art_type = array('und' => array(0 => array('tid' => 5)));
+        }
+        
+        foreach($nodeinfo->audio as $row) {
+          $f = _ogamigrate_file_copy("$oldpath/" . $row->filepath, NULL, FILE_EXISTS_RENAME, $uid);
+          if($f->fid)
+            array_push($node->field_art_files['und'], _ogamigrate_file_array($f));
+        }
+
+        /*  Let the new site handle the audio previews
+        foreach($nodeinfo->audio_preview as $row) {
+          $f = _ogamigrate_file_copy("$oldpath/" . $row->filepath, NULL, FILE_EXISTS_RENAME, $uid);
+          if($f->fid)
+            array_push($node->field_art_preview['und'], _ogamigrate_file_array($f));
+        } 
+        */
+      }
+      
+      db_set_active('default');
+      #error_log("Processing nid $nid / {$context['sandbox']['max']} ({$nodeinfo->title}) vid: {$context['sandbox']['vid']}");
+      if(($node->type == 'forum' && $node->forum_tid) || $node->type != 'forum') {
+        node_save($node);
+        $newnid = db_query("select max(nid) from {node}")->fetchField();
+        $node->nid = $newnid;
+        db_set_active('default');
+        db_query("update {node} set changed = :changed where nid = :nid", array(':changed' => $nodeinfo->changed, ':nid' => $newnid));
+        _ogamigrate_comments($nodeinfo, $node, $context['sandbox']['user_map']);
+        db_set_active('default');
+      } else {
+        error_log($node->title . " (" . $nodeinfo->nid . ") had no forum ID");
+      }
+      $context['results'][] = $nid . ' : ' . $nodeinfo->title;
+      $context['sandbox']['current_nid'] = $nid;
+      $context['message'] = "Processing nid {$nid} / {$context['sandbox']['max']} ({$nodeinfo->title})";
+    }
+  }
+  
+  $context['finished'] = $context['sandbox']['current_nid'] / $context['sandbox']['max'];
+  db_set_active('default');
+  variable_set('comment_maintain_node_statistics', FALSE);
+}
+
+function _ogamigrate_clean_tags(&$context) {
+}
+
+function _ogamigrate_favorites(&$context) {
+}
+
+function _ogamigrate_finished($success, $results, $operations) {
+  error_log('finished');
+  if ($success) {
+    $message = format_plural(count($results), 'One item processed.', '@count items processed.');
+  }
+  else {
+    $message = t('Finished with an error.');
+  }
+  drupal_set_message($message);
+  /*
+  // Providing data for the redirected page is done through $_SESSION.
+  foreach ($results as $result) {
+    $items[] = t('Loaded node %title.', array('%title' => $result));
+  }
+  $_SESSION['my_batch_results'] = $items;
+  */
+}
+
+function _ogamigrate_complete() {
+  $output = "<p>Migration complete.</p><p><a href='.'>Coconuts don't migrate!</a></p>";
+  return $output;
+}
+
+function _ogamigrate_load_node_fields(&$nodeinfo, $fields) {
+  foreach($fields as $field)
+    _ogamigrate_load_node_field($nodeinfo, $field);
+}
+
+function _ogamigrate_load_file_fields(&$nodeinfo, $fields) {
+  foreach($fields as $field)
+    _ogamigrate_load_file_field($nodeinfo, $field);
+}
+
+function _ogamigrate_load_node_revision(&$nodeinfo) {
+  db_set_active('old');
+  $nid = $nodeinfo->nid;
+  $vid = db_query('select max(vid) from {node_revisions} where nid = :nid', array(':nid' => $nid))->fetchField();
+  
+  try {
+    /*
+    $result = db_select('node_revisions')
+    ->fields('node_revisions', array('vid', 'body', 'teaser', 'format', 'log'))
+    ->condition('nid', $nid, '=')
+    ->condition('vid', $vid, '=')
+    ->execute();
+    */
+    $result = db_query("select vid, body, teaser, format, log from {node_revisions} where nid = :nid and vid = :vid", array(":nid" => $nid, ":vid" => $vid));
+  } catch (Exception $e) {
+    error_log("query failed: " . $e->getMessage());
+    error_log("query: " . $e->query_string);
+  } 
+  
+  foreach($result as $row) {
+    //error_log("BODY: " . $row->body);
+    $nodeinfo->vid = $vid;
+    $nodeinfo->body = $row->body;
+    $nodeinfo->teaser = $row->teaser;
+    $nodeinfo->format = $row->format;
+    $nodeinfo->log = $row->log;
+  }
+}
+
+function _ogamigrate_load_node_field(&$nodeinfo, $field) {
+  db_set_active('old');
+  $table = "content_field_" . $field;
+  $vid = $nodeinfo->vid;
+  $fieldname = 'field_' . $field . '_value';
+  
+  #error_log("load_node_field: $nid / $field / $table");
+  
+  try {
+    /*
+    $result = db_select($table)
+      ->fields($table, array($fieldname, 'delta'))
+      ->condition('vid', $vid, '=')
+      ->orderBy('delta')
+      ->execute();
+    */
+    $result = db_query("select $fieldname, delta from {{$table}} where vid = :vid order by delta", array(":vid" => $vid));
+  } catch (Exception $e) {
+    error_log("query failed: " . $e->getMessage());
+    error_log("query: " . $e->query_string);
+  } 
+  
+  $nodeinfo->$field = $result;
+}
+
+function _ogamigrate_load_file_field(&$nodeinfo, $field) {
+  db_set_active('old');
+  $table = "content_field_" . $field;
+  $vid = $nodeinfo->vid;
+  $fidfield = 'field_' . $field . '_fid';
+  
+  #error_log("Table: $table");
+  try {
+    /*
+    $result = db_select($table)
+      ->fields($table, array($fidfield, 'delta'))
+      ->condition('vid', $vid, '=')
+      #->leftJoin('files', 'files', "files.fid = $table.$fidfield")
+      #->fields('files', array('filename', 'filepath', 'filemime', 'status', 'timestamp'))
+      ->orderBy("$table.delta")
+      ->execute();
+    */
+    
+    $result = db_query("select filename, filepath, filemime, status from {{$table}} t, files where t.vid = :vid and files.fid = t.$fidfield", array(':vid' => $vid));
+  } catch (Exception $e) {
+    error_log("query failed: " . $e->getMessage());
+    error_log("query: " . $e->query_string);
+  } 
+  
+  $nodeinfo->$field = $result;
+}
+
+function _ogamigrate_load_local_file_field(&$nodeinfo, $field) {
+  db_set_active('old');
+  $table = "content_type_" . $nodeinfo->type;
+  $vid = $nodeinfo->vid;
+  $fidfield = 'field_' . $field . '_fid';
+  
+  try {
+    $result = db_query("select filename, filepath, filemime, status from {{$table}} t, files where t.vid = :vid and files.fid = t.$fidfield", array(':vid' => $vid));
+  } catch (Exception $e) {
+    error_log("query failed: " . $e->getMessage());
+    error_log("query: " . $e->query_string);
+  } 
+  
+  $nodeinfo->$field = $result;
+}
+
+function _ogamigrate_get_tid($term, $vid) {
+  db_set_active('default');
+  
+  $terms = taxonomy_term_load_multiple(array(), array('name' => $term, 'vid' => $vid));
+  //error_log("TERMS: " . print_r($terms, true));
+  
+  foreach($terms as $term) {
+    return $term->tid;
+  }
+}
+
+function _ogamigrate_load_vocabulary($vid) {
+  db_set_active('default');
+  
+  $terms = taxonomy_term_load_multiple(array(), array('vid' => $vid));
+  $vocab = array();
+  
+  foreach($terms as $term) {
+    $vocab[$term->name] = $term->tid;
+  }
+  
+  return $vocab;
+}
+
+function _ogamigrate_load_old_vocabulary($vid) {
+  db_set_active('old');
+  
+  $result = db_query("select name, tid from term_data where vid = :vid", array(":vid" => $vid));
+  
+  $vocab = array();
+  foreach($result as $row) {
+    $vocab[$row->tid] = $row->name;
+  }
+  
+  return $vocab;
+}
+
+function _ogamigrate_get_old_term($term, $vid) {
+  db_set_active('old');
+  
+  return db_query("select name from term_data where vid = :vid and tid = :tid", array(":vid" => $vid, ':tid' => $term))->fetchField();
+}
+
+function _ogamigrate_node_add_tags(&$node, &$nodeinfo, &$context, $field, $vid) {
+  $fieldname = "field_" . $field . "_value";
+  $keys = array();
+  foreach($nodeinfo->$field as $row) {
+    $old_term = _ogamigrate_get_old_term($row->$fieldname, $vid);
+    $keys[$old_term] = true;
+    $tid = _ogamigrate_get_tid($old_term, $context['sandbox']['vid']);
+    if($tid)
+      array_push($node->field_art_tags['und'], array('tid' => $tid));
+    #error_log("Tag ($field): " . $row->$fieldname . " -> $old_term -> $tid");
+  }
+  
+  return $keys;
+}
+
+function _ogamigrate_file_copy($source, $destination = NULL, $replace = FILE_EXISTS_RENAME, $uid = NULL) {
+  db_set_active('default');
+  if($uid == NULL) {
+    global $user;
+    $uid = $user->uid;
+  }
+  
+  if (empty($destination)) {
+    $destination = file_default_scheme() . '://';
+  }
+  
+  if (!file_valid_uri($destination)) {
+    error_log("The data could not be saved because the destination $destination is invalid. This may be caused by improper use of file_save_data() or a missing stream wrapper.");
+    return FALSE;
+  }
+  
+  if ($uri = file_unmanaged_copy($source, $destination, $replace)) {
+    // Create a file object.
+    $file = new stdClass();
+    $file->fid = NULL;
+    $file->uri = $uri;
+    $file->filename = basename($source);
+    $file->filemime = file_get_mimetype($file->uri);
+    $file->uid      = $uid;
+    $file->status   = FILE_STATUS_PERMANENT;
+    // If we are replacing an existing file re-use its database record.
+    if ($replace == FILE_EXISTS_REPLACE) {
+      $existing_files = file_load_multiple(array(), array('uri' => $uri));
+      if (count($existing_files)) {
+        $existing = reset($existing_files);
+        $file->fid = $existing->fid;
+        $file->filename = $existing->filename;
+      }
+    }
+    // If we are renaming around an existing file (rather than a directory),
+    // use its basename for the filename.
+    elseif ($replace == FILE_EXISTS_RENAME && is_file($destination)) {
+      $file->filename = basename($destination);
+    }
+    
+    //error_log("COPY: $source -> $uri ({$file->filename} / $destination)");
+    return file_save($file);
+  }
+  return FALSE;
+}
+
+function _ogamigrate_file_array($file) {
+  $f = get_object_vars($file);
+  $f['display'] = 1;
+  $f['status'] = 1;
+  
+  return $f;
+}
+
+function _ogamigrate_comments($oldnode, $newnode, $usermap) {
+  db_set_active('old');
+  $comments = db_query('select * from {comments} where nid = :nid', array(':nid' => $oldnode->nid));
+  db_set_active('default');
+  
+  $parents = array();
+  
+  foreach($comments as $comment) {
+    error_log("Migrating comment {$comment->subject} for {$comment->nid}");
+    $new = new stdClass;
+    $new->uid = $usermap[$comment->uid];
+    $new->nid = $newnode->nid;
+    $new->pid = 0; //$parents[$comment->pid];
+    $new->subject = $comment->subject;
+    $new->comment_body = array('und' => array(0 => array('value' => $comment->comment, 'format' => 'filtered_html')));
+    $new->hostname = $comment->hostname;
+    $new->created = $comment->timestamp;
+    $new->changed = $comment->timestamp;
+    #$new->format = 'filtered_html';
+    $new->thread = $comment->thread;
+    $new->status = 1;
+    $new->name = $comment->name;
+    $new->mail = $comment->mail;
+    $new->homepage = $comment->homepage;
+    $new->language = 'und';
+    
+    comment_save($new);
+  }
+}
+
+function _ogamigrate_get_user_map() {
+  db_set_active('default');
+  $map = array();
+  $result = db_query("select uid from {users}");
+  foreach($result as $row) {
+    $account = user_load($row->uid);
+    $map[$account->field_oga1_uid['und'][0]['value']] = $row->uid;
+    #error_log(print_r($account->field_oga1_uid['und'][0]['value'], true));
+    #error_log($account->field_oga1_uid['und'][0]['value'] . " -> " . $uid);
+  }
+  
+  $map[1] = 1;
+  $map[0] = 0;
+  
+  return $map;
+}
+
+
+function _ogamigrate_get_license_list() {
+  return 'a:7:{i:12;O:8:"stdClass":10:{s:3:"tid";s:2:"12";s:3:"vid";s:1:"4";s:4:"name";s:9:"CC-BY 3.0";s:11:"description";s:0:"";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"0";s:23:"vocabulary_machine_name";s:8:"licenses";s:18:"field_license_deed";a:1:{s:3:"und";a:1:{i:0;a:3:{s:5:"value";s:43:"http://creativecommons.org/licenses/by/3.0/";s:6:"format";N;s:10:"safe_value";s:43:"http://creativecommons.org/licenses/by/3.0/";}}}s:19:"field_license_image";a:1:{s:3:"und";a:1:{i:0;a:12:{s:3:"fid";s:1:"1";s:3:"alt";s:9:"CC-BY 3.0";s:5:"title";s:9:"CC-BY 3.0";s:3:"uid";s:1:"1";s:8:"filename";s:9:"cc-by.png";s:3:"uri";s:33:"public://license_images/cc-by.png";s:8:"filemime";s:9:"image/png";s:8:"filesize";s:4:"4739";s:6:"status";s:1:"1";s:9:"timestamp";s:10:"1294245732";s:4:"type";N;s:11:"rdf_mapping";a:0:{}}}}s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}i:13;O:8:"stdClass":10:{s:3:"tid";s:2:"13";s:3:"vid";s:1:"4";s:4:"name";s:12:"CC-BY-SA 3.0";s:11:"description";s:0:"";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"0";s:23:"vocabulary_machine_name";s:8:"licenses";s:18:"field_license_deed";a:1:{s:3:"und";a:1:{i:0;a:3:{s:5:"value";s:46:"http://creativecommons.org/licenses/by-sa/3.0/";s:6:"format";N;s:10:"safe_value";s:46:"http://creativecommons.org/licenses/by-sa/3.0/";}}}s:19:"field_license_image";a:1:{s:3:"und";a:1:{i:0;a:12:{s:3:"fid";s:1:"2";s:3:"alt";s:12:"CC-BY-SA 3.0";s:5:"title";s:12:"CC-BY-SA 3.0";s:3:"uid";s:1:"1";s:8:"filename";s:12:"cc-by-sa.png";s:3:"uri";s:36:"public://license_images/cc-by-sa.png";s:8:"filemime";s:9:"image/png";s:8:"filesize";s:4:"4880";s:6:"status";s:1:"1";s:9:"timestamp";s:10:"1294245822";s:4:"type";N;s:11:"rdf_mapping";a:0:{}}}}s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}i:14;O:8:"stdClass":10:{s:3:"tid";s:2:"14";s:3:"vid";s:1:"4";s:4:"name";s:3:"CC0";s:11:"description";s:0:"";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"0";s:23:"vocabulary_machine_name";s:8:"licenses";s:18:"field_license_deed";a:1:{s:3:"und";a:1:{i:0;a:3:{s:5:"value";s:49:"http://creativecommons.org/publicdomain/zero/1.0/";s:6:"format";N;s:10:"safe_value";s:49:"http://creativecommons.org/publicdomain/zero/1.0/";}}}s:19:"field_license_image";a:1:{s:3:"und";a:1:{i:0;a:12:{s:3:"fid";s:1:"3";s:3:"alt";s:3:"CC0";s:5:"title";s:3:"CC0";s:3:"uid";s:1:"1";s:8:"filename";s:7:"cc0.png";s:3:"uri";s:31:"public://license_images/cc0.png";s:8:"filemime";s:9:"image/png";s:8:"filesize";s:4:"1047";s:6:"status";s:1:"1";s:9:"timestamp";s:10:"1294245894";s:4:"type";N;s:11:"rdf_mapping";a:0:{}}}}s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}i:8;O:8:"stdClass":10:{s:3:"tid";s:1:"8";s:3:"vid";s:1:"4";s:4:"name";s:7:"GPL 2.0";s:11:"description";s:0:"";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"0";s:23:"vocabulary_machine_name";s:8:"licenses";s:18:"field_license_deed";a:1:{s:3:"und";a:1:{i:0;a:3:{s:5:"value";s:53:"http://www.gnu.org/licenses/old-licenses/gpl-2.0.html";s:6:"format";N;s:10:"safe_value";s:53:"http://www.gnu.org/licenses/old-licenses/gpl-2.0.html";}}}s:19:"field_license_image";a:1:{s:3:"und";a:1:{i:0;a:12:{s:3:"fid";s:1:"4";s:3:"alt";s:7:"GPL 2.0";s:5:"title";s:7:"GPL 2.0";s:3:"uid";s:1:"1";s:8:"filename";s:7:"gpl.png";s:3:"uri";s:31:"public://license_images/gpl.png";s:8:"filemime";s:9:"image/png";s:8:"filesize";s:4:"4172";s:6:"status";s:1:"1";s:9:"timestamp";s:10:"1294245988";s:4:"type";N;s:11:"rdf_mapping";a:0:{}}}}s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}i:9;O:8:"stdClass":10:{s:3:"tid";s:1:"9";s:3:"vid";s:1:"4";s:4:"name";s:7:"GPL 3.0";s:11:"description";s:0:"";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"0";s:23:"vocabulary_machine_name";s:8:"licenses";s:18:"field_license_deed";a:1:{s:3:"und";a:1:{i:0;a:3:{s:5:"value";s:40:"http://www.gnu.org/licenses/gpl-3.0.html";s:6:"format";N;s:10:"safe_value";s:40:"http://www.gnu.org/licenses/gpl-3.0.html";}}}s:19:"field_license_image";a:1:{s:3:"und";a:1:{i:0;a:12:{s:3:"fid";s:1:"5";s:3:"alt";s:7:"GPL 3.0";s:5:"title";s:7:"GPL 3.0";s:3:"uid";s:1:"1";s:8:"filename";s:7:"gpl.png";s:3:"uri";s:33:"public://license_images/gpl_0.png";s:8:"filemime";s:9:"image/png";s:8:"filesize";s:4:"4172";s:6:"status";s:1:"1";s:9:"timestamp";s:10:"1294246047";s:4:"type";N;s:11:"rdf_mapping";a:0:{}}}}s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}i:10;O:8:"stdClass":10:{s:3:"tid";s:2:"10";s:3:"vid";s:1:"4";s:4:"name";s:8:"LGPL 2.1";s:11:"description";s:0:"";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"0";s:23:"vocabulary_machine_name";s:8:"licenses";s:18:"field_license_deed";a:1:{s:3:"und";a:1:{i:0;a:3:{s:5:"value";s:41:"http://www.gnu.org/licenses/lgpl-3.0.html";s:6:"format";N;s:10:"safe_value";s:41:"http://www.gnu.org/licenses/lgpl-3.0.html";}}}s:19:"field_license_image";a:1:{s:3:"und";a:1:{i:0;a:12:{s:3:"fid";s:1:"6";s:3:"alt";s:8:"LGPL 2.1";s:5:"title";s:8:"LGPL 2.1";s:3:"uid";s:1:"1";s:8:"filename";s:8:"lgpl.png";s:3:"uri";s:32:"public://license_images/lgpl.png";s:8:"filemime";s:9:"image/png";s:8:"filesize";s:4:"4160";s:6:"status";s:1:"1";s:9:"timestamp";s:10:"1294246105";s:4:"type";N;s:11:"rdf_mapping";a:0:{}}}}s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}i:11;O:8:"stdClass":10:{s:3:"tid";s:2:"11";s:3:"vid";s:1:"4";s:4:"name";s:8:"LGPL 3.0";s:11:"description";s:0:"";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"0";s:23:"vocabulary_machine_name";s:8:"licenses";s:18:"field_license_deed";a:1:{s:3:"und";a:1:{i:0;a:3:{s:5:"value";s:41:"http://www.gnu.org/licenses/lgpl-3.0.html";s:6:"format";N;s:10:"safe_value";s:41:"http://www.gnu.org/licenses/lgpl-3.0.html";}}}s:19:"field_license_image";a:1:{s:3:"und";a:1:{i:0;a:12:{s:3:"fid";s:1:"7";s:3:"alt";s:8:"LGPL 3.0";s:5:"title";s:8:"LGPL 3.0";s:3:"uid";s:1:"1";s:8:"filename";s:8:"lgpl.png";s:3:"uri";s:34:"public://license_images/lgpl_0.png";s:8:"filemime";s:9:"image/png";s:8:"filesize";s:4:"4160";s:6:"status";s:1:"1";s:9:"timestamp";s:10:"1294246138";s:4:"type";N;s:11:"rdf_mapping";a:0:{}}}}s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}}';
+}
+
+static $art_types = 'a:6:{i:2;O:8:"stdClass":8:{s:3:"tid";s:1:"2";s:3:"vid";s:1:"3";s:4:"name";s:6:"2D Art";s:11:"description";s:0:"";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"0";s:23:"vocabulary_machine_name";s:9:"art_types";s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}i:4;O:8:"stdClass":8:{s:3:"tid";s:1:"4";s:3:"vid";s:1:"3";s:4:"name";s:6:"3D Art";s:11:"description";s:0:"";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"0";s:23:"vocabulary_machine_name";s:9:"art_types";s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}i:7;O:8:"stdClass":8:{s:3:"tid";s:1:"7";s:3:"vid";s:1:"3";s:4:"name";s:8:"Document";s:11:"description";s:0:"";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"0";s:23:"vocabulary_machine_name";s:9:"art_types";s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}i:5;O:8:"stdClass":8:{s:3:"tid";s:1:"5";s:3:"vid";s:1:"3";s:4:"name";s:5:"Music";s:11:"description";s:0:"";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"0";s:23:"vocabulary_machine_name";s:9:"art_types";s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}i:6;O:8:"stdClass":8:{s:3:"tid";s:1:"6";s:3:"vid";s:1:"3";s:4:"name";s:12:"Sound Effect";s:11:"description";s:0:"";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"0";s:23:"vocabulary_machine_name";s:9:"art_types";s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}i:3;O:8:"stdClass":8:{s:3:"tid";s:1:"3";s:3:"vid";s:1:"3";s:4:"name";s:7:"Texture";s:11:"description";s:0:"";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"0";s:23:"vocabulary_machine_name";s:9:"art_types";s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}}';
+
+static $art_ratings = 'a:4:{i:15;O:8:"stdClass":8:{s:3:"tid";s:2:"15";s:3:"vid";s:1:"5";s:4:"name";s:9:"Abandoned";s:11:"description";s:77:"This piece was submitted in a WIP state and has been abandoned by the author.";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"0";s:23:"vocabulary_machine_name";s:10:"art_rating";s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}i:16;O:8:"stdClass":8:{s:3:"tid";s:2:"16";s:3:"vid";s:1:"5";s:4:"name";s:3:"WIP";s:11:"description";s:69:"This piece is a work in progress and is not yet usable in most games.";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"1";s:23:"vocabulary_machine_name";s:10:"art_rating";s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}i:17;O:8:"stdClass":8:{s:3:"tid";s:2:"17";s:3:"vid";s:1:"5";s:4:"name";s:8:"Complete";s:11:"description";s:34:"This piece is complete and usable.";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"2";s:23:"vocabulary_machine_name";s:10:"art_rating";s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}i:18;O:8:"stdClass":8:{s:3:"tid";s:2:"18";s:3:"vid";s:1:"5";s:4:"name";s:7:"Refined";s:11:"description";s:39:"This work is highly refined and mature.";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"3";s:23:"vocabulary_machine_name";s:10:"art_rating";s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}}';
+
+static $userpoints = 'a:7:{i:19;O:8:"stdClass":8:{s:3:"tid";s:2:"19";s:3:"vid";s:1:"6";s:4:"name";s:6:"2D Art";s:11:"description";s:0:"";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"0";s:23:"vocabulary_machine_name";s:10:"userpoints";s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}i:20;O:8:"stdClass":8:{s:3:"tid";s:2:"20";s:3:"vid";s:1:"6";s:4:"name";s:6:"3D Art";s:11:"description";s:0:"";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"0";s:23:"vocabulary_machine_name";s:10:"userpoints";s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}i:24;O:8:"stdClass":8:{s:3:"tid";s:2:"24";s:3:"vid";s:1:"6";s:4:"name";s:9:"Documents";s:11:"description";s:0:"";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"0";s:23:"vocabulary_machine_name";s:10:"userpoints";s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}i:26;O:8:"stdClass":8:{s:3:"tid";s:2:"26";s:3:"vid";s:1:"6";s:4:"name";s:9:"Favorites";s:11:"description";s:0:"";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"0";s:23:"vocabulary_machine_name";s:10:"userpoints";s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}i:21;O:8:"stdClass":8:{s:3:"tid";s:2:"21";s:3:"vid";s:1:"6";s:4:"name";s:5:"Music";s:11:"description";s:0:"";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"0";s:23:"vocabulary_machine_name";s:10:"userpoints";s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}i:22;O:8:"stdClass":8:{s:3:"tid";s:2:"22";s:3:"vid";s:1:"6";s:4:"name";s:3:"SFX";s:11:"description";s:0:"";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"0";s:23:"vocabulary_machine_name";s:10:"userpoints";s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}i:23;O:8:"stdClass":8:{s:3:"tid";s:2:"23";s:3:"vid";s:1:"6";s:4:"name";s:8:"Textures";s:11:"description";s:0:"";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"0";s:23:"vocabulary_machine_name";s:10:"userpoints";s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}}';
+
+static $medals = 'a:4:{i:29;O:8:"stdClass":11:{s:3:"tid";s:2:"29";s:3:"vid";s:1:"7";s:4:"name";s:16:"2D Artist - Gold";s:11:"description";s:0:"";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"0";s:23:"vocabulary_machine_name";s:6:"medals";s:17:"field_medal_image";a:1:{s:3:"und";a:1:{i:0;a:12:{s:3:"fid";s:2:"15";s:3:"alt";s:0:"";s:5:"title";s:0:"";s:3:"uid";s:1:"1";s:8:"filename";s:11:"2d_gold.png";s:3:"uri";s:27:"public://medals/2d_gold.png";s:8:"filemime";s:9:"image/png";s:8:"filesize";s:4:"5790";s:6:"status";s:1:"1";s:9:"timestamp";s:10:"1296952348";s:4:"type";N;s:11:"rdf_mapping";a:0:{}}}}s:17:"field_points_type";a:1:{s:3:"und";a:1:{i:0;a:1:{s:3:"tid";s:2:"19";}}}s:21:"field_points_required";a:1:{s:3:"und";a:1:{i:0;a:1:{s:5:"value";s:2:"10";}}}s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}i:28;O:8:"stdClass":11:{s:3:"tid";s:2:"28";s:3:"vid";s:1:"7";s:4:"name";s:18:"2D Artist - Silver";s:11:"description";s:0:"";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"0";s:23:"vocabulary_machine_name";s:6:"medals";s:17:"field_medal_image";a:1:{s:3:"und";a:1:{i:0;a:12:{s:3:"fid";s:2:"14";s:3:"alt";s:0:"";s:5:"title";s:0:"";s:3:"uid";s:1:"1";s:8:"filename";s:13:"2d_silver.png";s:3:"uri";s:29:"public://medals/2d_silver.png";s:8:"filemime";s:9:"image/png";s:8:"filesize";s:4:"5718";s:6:"status";s:1:"1";s:9:"timestamp";s:10:"1296952319";s:4:"type";N;s:11:"rdf_mapping";a:0:{}}}}s:17:"field_points_type";a:1:{s:3:"und";a:1:{i:0;a:1:{s:3:"tid";s:2:"19";}}}s:21:"field_points_required";a:1:{s:3:"und";a:1:{i:0;a:1:{s:5:"value";s:1:"5";}}}s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}i:25;O:8:"stdClass":11:{s:3:"tid";s:2:"25";s:3:"vid";s:1:"7";s:4:"name";s:23:"Art Aficionado - Bronze";s:11:"description";s:50:"This user has marked 5 or more works as favorites.";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"2";s:23:"vocabulary_machine_name";s:6:"medals";s:17:"field_medal_image";a:1:{s:3:"und";a:1:{i:0;a:12:{s:3:"fid";s:2:"12";s:3:"alt";s:0:"";s:5:"title";s:0:"";s:3:"uid";s:1:"1";s:8:"filename";s:21:"aficionado_bronze.png";s:3:"uri";s:37:"public://medals/aficionado_bronze.png";s:8:"filemime";s:9:"image/png";s:8:"filesize";s:4:"5248";s:6:"status";s:1:"1";s:9:"timestamp";s:10:"1296943739";s:4:"type";N;s:11:"rdf_mapping";a:0:{}}}}s:17:"field_points_type";a:1:{s:3:"und";a:1:{i:0;a:1:{s:3:"tid";s:2:"26";}}}s:21:"field_points_required";a:1:{s:3:"und";a:1:{i:0;a:1:{s:5:"value";s:1:"1";}}}s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}i:27;O:8:"stdClass":11:{s:3:"tid";s:2:"27";s:3:"vid";s:1:"7";s:4:"name";s:18:"2D Artist - Bronze";s:11:"description";s:0:"";s:6:"format";s:13:"filtered_html";s:6:"weight";s:1:"3";s:23:"vocabulary_machine_name";s:6:"medals";s:17:"field_medal_image";a:1:{s:3:"und";a:1:{i:0;a:12:{s:3:"fid";s:2:"13";s:3:"alt";s:0:"";s:5:"title";s:0:"";s:3:"uid";s:1:"1";s:8:"filename";s:13:"2d_bronze.png";s:3:"uri";s:29:"public://medals/2d_bronze.png";s:8:"filemime";s:9:"image/png";s:8:"filesize";s:4:"5662";s:6:"status";s:1:"1";s:9:"timestamp";s:10:"1296952299";s:4:"type";N;s:11:"rdf_mapping";a:0:{}}}}s:17:"field_points_type";a:1:{s:3:"und";a:1:{i:0;a:1:{s:3:"tid";s:2:"19";}}}s:21:"field_points_required";a:1:{s:3:"und";a:1:{i:0;a:1:{s:5:"value";s:1:"1";}}}s:11:"rdf_mapping";a:5:{s:7:"rdftype";a:1:{i:0;s:12:"skos:Concept";}s:4:"name";a:1:{s:10:"predicates";a:2:{i:0;s:10:"rdfs:label";i:1;s:14:"skos:prefLabel";}}s:11:"description";a:1:{s:10:"predicates";a:1:{i:0;s:15:"skos:definition";}}s:3:"vid";a:2:{s:10:"predicates";a:1:{i:0;s:13:"skos:inScheme";}s:4:"type";s:3:"rel";}s:6:"parent";a:2:{s:10:"predicates";a:1:{i:0;s:12:"skos:broader";}s:4:"type";s:3:"rel";}}}}';
