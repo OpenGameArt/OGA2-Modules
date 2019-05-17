@@ -1,2 +1,20 @@
 # OGA2-Modules
-Version 2 of Open Game Art Modules
+Version 2 of Open Game Art Modules (for Drupal 7)
+
+## Dependencies
+ - [Compact Forms](https://www.drupal.org/project/compact_forms)
+ - [Content Construction Kit (CCK)](https://www.drupal.org/project/cck)
+ - [Chaos Tool Suite (ctools)](https://www.drupal.org/project/ctools)
+ - [Custom Formatters](https://www.drupal.org/project/custom_formatters)
+ - [Display Suite](https://www.drupal.org/project/ds)
+ - [Entity API](https://www.drupal.org/project/entity)
+ - [Features](https://www.drupal.org/project/features)
+ - [Field Group](https://www.drupal.org/project/field_group)
+ - [Flag](https://www.drupal.org/project/flag)
+ - [Menu block](https://www.drupal.org/project/menu_block)
+ - [Module Filter](https://www.drupal.org/project/module_filter)
+ - [References](https://www.drupal.org/project/references)
+ - [TaxonomyTerm Reference Tree Widget](https://www.drupal.org/project/term_reference_tree)
+ - [ThemeKey](https://www.drupal.org/project/themekey)
+ - [User Points](https://www.drupal.org/project/userpoints)
+ - [Views](https://www.drupal.org/project/views)
