@@ -21,7 +21,7 @@ function medals_install() {
   taxonomy_vocabulary_save($vocab);
   
   $fields = _medals_vocab_fields();
-  dsm($fields);
+  dpm($fields);
   foreach($fields as $field) {
     #print("Creating field...\n");
     #print_r($field);
@@ -33,12 +33,12 @@ function medals_install() {
 function medals_uninstall() {
   $vocab = array_pop(taxonomy_vocabulary_load_multiple(array(), array('machine_name' => 'medals')));
   #taxonomy_vocabulary_delete($vocab->vid);
-  dsm('deleting vocab');
-  dsm($vocab);
+  dpm('deleting vocab');
+  dpm($vocab);
   
   $fields = _medals_vocab_fields();
-  dsm('deleting fields');
-  dsm($fields);
+  dpm('deleting fields');
+  dpm($fields);
   foreach($fields as $fld => $name) {
     #field_delete_field($name);
   }
