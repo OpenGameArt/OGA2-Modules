@@ -8,7 +8,7 @@ function cctag_install() {
 
   $fields = _cctag_fields();
   foreach($fields as $field) {
-    dsm("Creating field...");
+    dpm("Creating field...");
     field_create_field($field['field_config']);
     field_create_instance($field['field_instance']);
   }
