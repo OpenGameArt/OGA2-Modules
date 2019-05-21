@@ -1064,7 +1064,7 @@ function oga_node_view($node, $view_mode, $langcode) {
     global $user;
 
     $flag = $flag = flag_get_flag('licensing_issue');
-    if($flag->is_flagged($node->nid)) {
+    if($flag && $flag->is_flagged($node->nid)) {
       $node->licensing_issue = true;
       $node->content['field_art_files'] = array(
         '#markup' => '<div class="field-label">File(s):&nbsp;</div><div style="padding-left: 20px; font-style: italic;">File(s) currently unavalable due to potential licensing issues.  We apologize for the inconvenience, and are working to correct the issue.</div>'
