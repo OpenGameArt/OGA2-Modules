@@ -313,7 +313,7 @@ function oga_field_formatter_view($entity_type, $entity, $field, $instance, $lan
         if($mime[0] == 'image') {
           #dsm($entity);
           $path = drupal_get_path_alias("node/{$entity->nid}");
-          $output .= "<img src='" . file_create_url(image_style_path($imagestyle[$display['type']], $item['uri'])) . "'  alt='Preview'>";
+          $output .= "<img src='" . image_style_url($imagestyle[$display['type']], $item['uri']) . "'  alt='Preview'>";
           $output = l($output, $path, array('html' => true));
           $element[$delta] = array('#markup' => $output);
         } elseif($mime[0] == 'audio' || $item['filemime'] == 'application/ogg') {
@@ -338,7 +338,7 @@ function oga_field_formatter_view($entity_type, $entity, $field, $instance, $lan
         if($mime[0] == 'image') {
           #dsm($entity);
           $path = file_create_url($item['uri']);
-          $output .= "<img src='" . file_create_url(image_style_path($imagestyle['art_preview_multiple'], $item['uri'])) . "'  alt='Preview'>";
+          $output .= "<img src='" . image_style_url($imagestyle['art_preview_multiple'], $item['uri']) . "'  alt='Preview'>";
           $output = l($output, $path,
             array(
               'html' => true,
@@ -389,7 +389,7 @@ function _oga_audio_preview($item, $mime, $entity_type, $entity, $field, $instan
   
 	$mp3_url = file_create_url($mp3_uri);
 	$ogg_url = file_create_url($ogg_uri);
-	$img = file_create_url(_oga_get_audio_image_uri(image_style_path($imagestyle[$display['type']], $item['uri'])));
+	$img = image_style_url($imagestyle[$display['type']], _oga_get_audio_image_uri($item['uri']));
   #image_style_path($imagestyle[$display['type']], $item['uri'])
 	$output = "<div class='{$display['type']} audio-preview' data-display-type='{$display['type']}'><div class='audio-preview-container display-type-{$imagestyle[$display['type']]}'><img class='audio-image' src='$img'><div class='play-button' data-ogg-url='$ogg_url' data-mp3-url='$mp3_url'></div></div></div>";
 	#$output = "<audio src='$url' controls='controls' class='{$display['type']}'></audio>";
