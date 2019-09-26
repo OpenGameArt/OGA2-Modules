@@ -1019,7 +1019,6 @@ function _oga_share_icons($title = null, $url = null) {
   $icons = array(
     'identica' => '/sites/default/files/archive/identica-24x24.png',
     'reddit' => '/sites/default/files/archive/reddit-24x24.png',
-    'google+' => '/sites/default/files/archive/google%2B-24x24.png',
     'twitter' => '/sites/default/files/archive/twitter-24x24.png',
     'facebook' => '/sites/default/files/archive/facebook-24x24.png',
   );
@@ -1039,8 +1038,6 @@ function _oga_share_icons($title = null, $url = null) {
   $html .= "<a href='https://identi.ca//index.php?action=newnotice&status_textarea=$message' title='identi.ca' target='_BLANK'><img src='{$icons['identica']}'></a> ";
 
   $html .= "<a href='http://www.reddit.com/submit?url=$url_clean&title=$title_clean' title='Reddit' target='_BLANK'><img src='{$icons['reddit']}'></a> ";
-
-  $html .= "<a href='https://plus.google.com/share?url=$url_clean' title='Google+' target='_BLANK'><img src='{$icons['google+']}'></a> ";
 
   $html .= "<a href='https://twitter.com/share?url=$url_clean&text=$title_clean' title='Twitter' target='_BLANK'><img src='{$icons['twitter']}'></a> ";
 
