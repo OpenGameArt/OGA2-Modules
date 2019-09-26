@@ -883,7 +883,7 @@ function oga2_field_default_fields() {
       'settings' => array(
         'description_field' => 0,
         'file_directory' => '',
-        'file_extensions' => 'jpg png gif svg mp3 ogg',
+        'file_extensions' => 'jpg jpeg png gif svg mp3 ogg',
         'max_filesize' => '',
         'user_register_form' => FALSE,
       ),
@@ -1887,7 +1887,7 @@ function oga2_field_default_fields() {
       'settings' => array(
         'description_field' => 0,
         'file_directory' => '',
-        'file_extensions' => 'jpg png gif svg mp3 ogg',
+        'file_extensions' => 'jpg jpeg png gif svg mp3 ogg',
         'max_filesize' => '',
         'user_register_form' => FALSE,
       ),
